@@ -8,6 +8,9 @@
 #define FUSE_USE_VERSION 27
 #define _FILE_OFFSET_BITS 64
 
+#define MAX_PATH_LEN 10
+#define MAX_NAME_LEN 27
+
 #include <stdlib.h>
 #include <stddef.h>
 #include <unistd.h>
@@ -33,6 +36,12 @@
 extern int block_read(void *buf, int lba, int nblks);
 extern int block_write(void *buf, int lba, int nblks);
 
+/*
+Global variables and structures used by the filesystem.
+*/
+static struct fs_super superblock;      // global superblock
+static unsigned char *bitmap;   // global block bitmap
+
 /* bitmap functions
  */
 void bit_set(unsigned char *map, int i)
@@ -48,7 +57,6 @@ int bit_test(unsigned char *map, int i)
     return map[i/8] & (1 << (i%8));
 }
 
-
 /* init - this is called once by the FUSE framework at startup. Ignore
  * the 'conn' argument.
  * recommended actions:
@@ -57,7 +65,32 @@ int bit_test(unsigned char *map, int i)
  */
 void* fs_init(struct fuse_conn_info *conn)
 {
-    /* your code here */
+    char buffer[FS_BLOCK_SIZE];
+    if (block_read(buffer, 0, 1) != 0) 
+    {
+        perror("In fs_init: superblock read failed");
+        return NULL;
+    }
+    memcpy(&superblock, buffer, sizeof(struct fs_super));
+
+    if (superblock.magic != FS_MAGIC) {
+        perror("In fs_init: invalid magic number");
+        return NULL;
+    }
+
+    bitmap = malloc(FS_BLOCK_SIZE); // Allocate memory for block bitmap
+    if (!bitmap) {
+        perror("In fs_init: bitmap malloc failed");
+        return NULL;
+    }
+
+    if (block_read(bitmap, 1, 1) != 0) {
+        perror("In fs_init: bitmap read failed");
+        free(bitmap);
+        bitmap = NULL;
+        return NULL;
+    }
+
     return NULL;
 }
 
@@ -83,6 +116,93 @@ void* fs_init(struct fuse_conn_info *conn)
  *    free(_path);
  */
 
+int read_inode(uint32_t inum, struct fs_inode *inode) 
+{
+    char buffer[FS_BLOCK_SIZE];
+    if (block_read(buffer, inum, 1) != 0) 
+    {
+        return -1;
+    }  
+    memcpy(inode, buffer, sizeof(struct fs_inode));
+    return 0;
+}
+
+
+int pathparse(const char *path, char **components) 
+{
+    int i;
+    for (i = 0; i < MAX_PATH_LEN; i++) 
+    {
+        if ((components[i] = strtok(path, "/")) == NULL)
+        {
+            break;
+        }
+        if (strlen(components[i]) > MAX_NAME_LEN)
+        {
+            components[i][MAX_NAME_LEN] = 0;
+        }
+        path = NULL;
+    }
+    return i;
+}
+
+int translate(char *path, uint32_t *inum, struct fs_inode *inode) 
+{
+    char *components[MAX_PATH_LEN];
+    int num_components = pathparse(path, components);
+    uint32_t current_inum = 2;  // Root inode
+
+    for (int i = 0; i < num_components; i++) 
+    {
+        struct fs_inode current_inode;
+        if (read_inode(current_inum, &current_inode) != 0) 
+        {
+            perror("In translate: read_inode failed");
+            return -EIO;
+        }
+        if (!S_ISDIR(current_inode.mode)) 
+        {
+            perror("In translate: not a directory");
+            return -ENOTDIR;
+        }
+        int found = 0;
+        for (int j = 0; j < current_inode.size / FS_BLOCK_SIZE; j++) 
+        {
+            char block[FS_BLOCK_SIZE];
+            if (block_read(block, current_inode.ptrs[j], 1) != 0) 
+            {
+                perror("In translate: block read failed");
+                return -EIO;
+            }
+            struct fs_dirent *entries = (struct fs_dirent *)block;
+            for (int k = 0; k < FS_BLOCK_SIZE / sizeof(struct fs_dirent); k++) 
+            {
+                if (entries[k].valid && strcmp(entries[k].name, components[i]) == 0) 
+                {
+                    current_inum = entries[k].inode;
+                    found = 1;
+                    break;
+                }
+            }
+            if (found) 
+            {
+                break;
+            }
+        }
+        if (!found) 
+        {
+            return -ENOENT;
+        }
+    }
+
+    if (read_inode(current_inum, inode) != 0) 
+    {
+        perror("In translate: read_inode failed for final inode");
+        return -EIO;
+    }
+    *inum = current_inum;
+    return 0;
+}
 
 
 /* getattr - get file or directory attributes. For a description of
