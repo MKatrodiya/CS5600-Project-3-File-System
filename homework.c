@@ -220,8 +220,23 @@ int translate(char *path, uint32_t *inum, struct fs_inode *inode)
  */
 int fs_getattr(const char *path, struct stat *sb)
 {
-    /* your code here */
-    return -EOPNOTSUPP;
+    uint32_t inum;
+    struct fs_inode inode;
+    int res = translate(path, &inum, &inode);
+    if (res != 0) 
+    {
+        return res;
+    }
+    sb->st_uid = inode.uid;
+    sb->st_gid = inode.gid;
+    sb->st_mode = inode.mode;
+    sb->st_size = inode.size;
+    sb->st_nlink = 1;
+    sb->st_atime = inode.mtime;
+    sb->st_mtime = inode.mtime;
+    sb->st_ctime = inode.ctime;
+
+    return 0;
 }
 
 /* readdir - get directory contents.
@@ -236,11 +251,55 @@ int fs_getattr(const char *path, struct stat *sb)
  * hint - check the testing instructions if you don't understand how
  *        to call the filler function
  */
-int fs_readdir(const char *path, void *ptr, fuse_fill_dir_t filler,
-		       off_t offset, struct fuse_file_info *fi)
+int fs_readdir(const char *path, void *ptr, fuse_fill_dir_t filler, off_t offset, struct fuse_file_info *fi)
 {
-    /* your code here */
-    return -EOPNOTSUPP;
+    uint32_t inum;
+    struct fs_inode inode;
+    int res = translate(path, &inum, &inode);
+    if (res != 0)
+    {
+        perror("In fs_readdir: translate failed");
+        return res;
+    }
+    if (!S_ISDIR(inode.mode)) 
+    {
+        perror("In fs_readdir: not a directory");
+        return -ENOTDIR;
+    }
+
+    for (int i = 0; i < inode.size / FS_BLOCK_SIZE; i++) 
+    {
+        char block[FS_BLOCK_SIZE];
+        if (block_read(block, inode.ptrs[i], 1) != 0) 
+        {
+            perror("In fs_readdir: block read failed");
+            return -EIO;
+        }
+        struct fs_dirent *entries = (struct fs_dirent *)block;
+        for (int j = 0; j < FS_BLOCK_SIZE / sizeof(struct fs_dirent); j++) 
+        {
+            if (entries[j].valid) {
+                struct stat st;
+                memset(&st, 0, sizeof(st));
+                
+                struct fs_inode entry_inode;
+                if (read_inode(entries[j].inode, &entry_inode) != 0) 
+                {
+                    continue;
+                }
+                
+                st.st_mode = entry_inode.mode;
+                st.st_nlink = 1;
+                st.st_uid = entry_inode.uid;
+                st.st_gid = entry_inode.gid;
+                st.st_size = entry_inode.size;
+                
+                filler(ptr, entries[j].name, &st, 0);
+            }
+            
+        }
+    }
+    return 0;
 }
 
 /* create - create a new file with specified permissions
