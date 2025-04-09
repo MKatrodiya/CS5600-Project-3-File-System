@@ -421,11 +421,50 @@ int fs_truncate(const char *path, off_t len)
  *   - on error, return <0
  * Errors - path resolution, ENOENT, EISDIR
  */
-int fs_read(const char *path, char *buf, size_t len, off_t offset,
-	    struct fuse_file_info *fi)
+int fs_read(const char *path, char *buf, size_t len, off_t offset, struct fuse_file_info *fi)
 {
-    /* your code here */
-    return -EOPNOTSUPP;
+    uint32_t inum;
+    struct fs_inode inode;
+    int res = translate(path, &inum, &inode);
+    if (res != 0) 
+    {
+        return res;
+    }
+    if (!S_ISREG(inode.mode)) 
+    {
+        return -EISDIR;
+    }
+
+    if (offset >= inode.size) 
+    {
+        return 0;
+    }
+    if (offset + len > inode.size) 
+    {
+        len = inode.size - offset;
+    }
+    size_t bytes_read = 0;
+    while (bytes_read < len) 
+    {
+        uint32_t block_index = (offset + bytes_read) / FS_BLOCK_SIZE;
+        uint32_t block_offset = (offset + bytes_read) % FS_BLOCK_SIZE;
+        uint32_t block = inode.ptrs[block_index];
+        char block_data[FS_BLOCK_SIZE];
+        if (block_read(block_data, block, 1) != 0) 
+        {
+            perror("In fs_read: block read failed");
+            return -EIO;
+        }
+
+        size_t copy_len = FS_BLOCK_SIZE - block_offset;
+        if (copy_len > len - bytes_read) 
+        {
+            copy_len = len - bytes_read;
+        }
+        memcpy(buf + bytes_read, block_data + block_offset, copy_len);
+        bytes_read += copy_len;
+    }
+    return bytes_read;
 }
 
 /* write - write data to a file
