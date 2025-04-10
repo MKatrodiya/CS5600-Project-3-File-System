@@ -146,7 +146,7 @@ int pathparse(const char *path, char **components)
     return i;
 }
 
-int translate(char *path, uint32_t *inum, struct fs_inode *inode) 
+int translate(const char *path, uint32_t *inum, struct fs_inode *inode) 
 {
     char *components[MAX_PATH_LEN];
     int num_components = pathparse(path, components);
