@@ -15,6 +15,8 @@
 #include <stdlib.h>
 #include <errno.h>
 
+#include "fs5600.h"
+
 extern struct fuse_operations fs_ops;
 extern void block_init(char *file);
 
@@ -35,6 +37,31 @@ START_TEST(test_getattr_file_1k)
     ck_assert_int_eq(st.st_gid, 500);
     ck_assert(S_ISREG(st.st_mode));
     ck_assert_int_eq(st.st_size, 1000);
+}
+END_TEST
+
+START_TEST(test_read_file_1k)
+{
+    char buf[15000];
+    int rv = fs_ops.read("/file.1k", buf, 1000, 0, NULL);
+    ck_assert_int_eq(rv, 1000);
+
+    unsigned cksum = crc32(0, (unsigned char *)buf, 1000);
+    ck_assert_int_eq(cksum, 1726121896);
+}
+END_TEST
+
+START_TEST(test_statfs_values)
+{
+    struct statvfs sv;
+    int rv = fs_ops.statfs("/", &sv);
+    ck_assert_int_eq(rv, 0);
+
+    ck_assert_int_eq(sv.f_bsize, FS_BLOCK_SIZE);
+    ck_assert(sv.f_blocks > 0);
+    ck_assert(sv.f_bfree <= sv.f_blocks);
+    ck_assert_int_eq(sv.f_bavail, sv.f_bfree);
+    ck_assert_int_eq(sv.f_namemax, MAX_NAME_LEN);
 }
 END_TEST
 
@@ -70,6 +97,8 @@ int main(int argc, char **argv)
 
     tcase_add_test(tc, a_test); /* see START_TEST above */
     tcase_add_test(tc, test_getattr_file_1k);
+    tcase_add_test(tc, test_read_file_1k);
+    tcase_add_test(tc, test_statfs_values);
 
     suite_add_tcase(s, tc);
     SRunner *sr = srunner_create(s);

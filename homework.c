@@ -434,7 +434,6 @@ int fs_read(const char *path, char *buf, size_t len, off_t offset, struct fuse_f
     {
         return -EISDIR;
     }
-
     if (offset >= inode.size) 
     {
         return 0;
@@ -498,8 +497,23 @@ int fs_statfs(const char *path, struct statvfs *st)
      * it's OK to calculate this dynamically on the rare occasions
      * when this function is called.
      */
-    /* your code here */
-    return -EOPNOTSUPP;
+    memset(st, 0, sizeof(struct statvfs)); // To zero the structure's other values
+    st->f_bsize = FS_BLOCK_SIZE;
+    int total_blocks = superblock.disk_size;
+    int metadata_blocks = 1 + 1; // 1 for superblock + 1 bitmap block
+    st->f_blocks = total_blocks - metadata_blocks;
+
+    int used_blocks = 0;
+    for (int i = 0; i < superblock.disk_size; i++) {
+        if (bit_test(bitmap, i)) 
+        {
+            used_blocks++;
+        }
+    }
+    st->f_bfree = st->f_blocks - used_blocks;
+    st->f_bavail = st->f_bfree;
+    st->f_namemax = MAX_NAME_LEN;
+    return 0;
 }
 
 /* operations vector. Please don't rename it, or else you'll break things

@@ -12,6 +12,9 @@
 #define FS_BLOCK_SIZE 4096
 #define FS_MAGIC 0x30303635
 
+#define MAX_PATH_LEN 10
+#define MAX_NAME_LEN 27
+
 /* how many buckets of size M do you need to hold N items? 
  */
 #define DIV_ROUND_UP(N, M) ((N) + (M) - 1) / (M)

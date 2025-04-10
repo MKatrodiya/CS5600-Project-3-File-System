@@ -54,3 +54,7 @@ dkms.conf
 .vscode
 
 __pycache__
+
+hw3fuse
+test.img
+unittest-1
