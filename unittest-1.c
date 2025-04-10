@@ -15,6 +15,9 @@
 #include <stdlib.h>
 #include <errno.h>
 
+extern struct fuse_operations fs_ops;
+extern void block_init(char *file);
+
 
 /* change test name and make it do something useful */
 START_TEST(a_test)
@@ -22,6 +25,19 @@ START_TEST(a_test)
     ck_assert_int_eq(1, 1);
 }
 END_TEST
+
+START_TEST(test_getattr_file_1k)
+{
+    struct stat st;
+    int rv = fs_ops.getattr("/file.1k", &st);
+    ck_assert_int_eq(rv, 0);
+    ck_assert_int_eq(st.st_uid, 500);
+    ck_assert_int_eq(st.st_gid, 500);
+    ck_assert(S_ISREG(st.st_mode));
+    ck_assert_int_eq(st.st_size, 1000);
+}
+END_TEST
+
 
 /* this is an example of a callback function for readdir
  */
@@ -42,8 +58,7 @@ int empty_filler(void *ptr, const char *name, const struct stat *stbuf,
  *  fs_ops.statfs(path, struct statvfs *sv);
  */
 
-extern struct fuse_operations fs_ops;
-extern void block_init(char *file);
+
 
 int main(int argc, char **argv)
 {
@@ -54,7 +69,7 @@ int main(int argc, char **argv)
     TCase *tc = tcase_create("read_mostly");
 
     tcase_add_test(tc, a_test); /* see START_TEST above */
-    /* add more tests here */
+    tcase_add_test(tc, test_getattr_file_1k);
 
     suite_add_tcase(s, tc);
     SRunner *sr = srunner_create(s);
