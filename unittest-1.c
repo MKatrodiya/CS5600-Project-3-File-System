@@ -79,7 +79,7 @@ END_TEST
 
 START_TEST(test_read_file_1k)
 {
-    char buf[15000];
+    char buf[10000];
     int rv = fs_ops.read("/file.1k", buf, 1000, 0, NULL);
     ck_assert_int_eq(rv, 1000);
 
@@ -99,6 +99,18 @@ START_TEST(test_statfs_values)
     ck_assert(sv.f_bfree <= sv.f_blocks);
     ck_assert_int_eq(sv.f_bavail, sv.f_bfree);
     ck_assert_int_eq(sv.f_namemax, MAX_NAME_LEN);
+}
+END_TEST
+
+START_TEST(test_chmod_file_1k)
+{
+    int rv = fs_ops.chmod("/file.1k", 0755);
+    ck_assert_int_eq(rv, 0);
+
+    struct stat st;
+    int rv2 = fs_ops.getattr("/file.1k", &st);
+    ck_assert_int_eq(rv2, 0);
+    ck_assert_int_eq(st.st_mode & 0777, 0755);
 }
 END_TEST
 
@@ -136,6 +148,7 @@ int main(int argc, char **argv)
     tcase_add_test(tc, test_readdir_root);
     tcase_add_test(tc, test_read_file_1k);
     tcase_add_test(tc, test_statfs_values);
+    tcase_add_test(tc, test_chmod_file_1k);
 
     suite_add_tcase(s, tc);
     SRunner *sr = srunner_create(s);

@@ -10,6 +10,7 @@
 
 #define MAX_PATH_LEN 10
 #define MAX_NAME_LEN 27
+#define S_IFMT  0170000 
 
 #include <stdlib.h>
 #include <stddef.h>
@@ -19,6 +20,7 @@
 #include <string.h>
 #include <stdio.h>
 #include <errno.h>
+#include <sys/stat.h>
 
 #include "fs5600.h"
 
@@ -130,19 +132,22 @@ int read_inode(uint32_t inum, struct fs_inode *inode)
 
 int pathparse(const char *path, char **components) 
 {
-    int i;
-    for (i = 0; i < MAX_PATH_LEN; i++) 
+    char *token;
+    int i = 0;
+    char *path_copy = strdup(path);
+    if (!path_copy) 
     {
-        if ((components[i] = strtok(path, "/")) == NULL)
-        {
-            break;
-        }
-        if (strlen(components[i]) > MAX_NAME_LEN)
-        {
-            components[i][MAX_NAME_LEN] = 0;
-        }
-        path = NULL;
+        return -1;
     }
+
+    token = strtok(path_copy, "/");
+    while (token != NULL && i < MAX_PATH_LEN) 
+    {
+        components[i] = strdup(token);
+        i++;
+        token = strtok(NULL, "/");
+    }
+    free(path_copy);
     return i;
 }
 
@@ -150,16 +155,27 @@ int translate(const char *path, uint32_t *inum, struct fs_inode *inode)
 {
     char *components[MAX_PATH_LEN];
     int num_components = pathparse(path, components);
-    uint32_t current_inum = 2;  // Root inode
+    uint32_t current_inum = 2;
+    uint32_t parent_inum = 2;
 
     for (int i = 0; i < num_components; i++) 
     {
+        if (strcmp(components[i], ".") == 0) {
+            continue;
+        }
+
+        if (strcmp(components[i], "..") == 0) {
+            current_inum = parent_inum;
+            continue;
+        }
+
         struct fs_inode current_inode;
         if (read_inode(current_inum, &current_inode) != 0) 
         {
             perror("In translate: read_inode failed");
             return -EIO;
         }
+
         if (!S_ISDIR(current_inode.mode)) 
         {
             perror("In translate: not a directory");
@@ -179,6 +195,7 @@ int translate(const char *path, uint32_t *inum, struct fs_inode *inode)
             {
                 if (entries[k].valid && strcmp(entries[k].name, components[i]) == 0) 
                 {
+                    parent_inum = current_inum;
                     current_inum = entries[k].inode;
                     found = 1;
                     break;
@@ -386,8 +403,25 @@ int fs_rename(const char *src_path, const char *dst_path)
  */
 int fs_chmod(const char *path, mode_t mode)
 {
-    /* your code here */
-    return -EOPNOTSUPP;
+    uint32_t inum;
+    struct fs_inode inode;
+    int res = translate(path, &inum, &inode);
+    if (res != 0) 
+    {
+        return res;
+    }
+    inode.mode = (inode.mode & S_IFMT) | (mode & 0777);
+    char block[FS_BLOCK_SIZE];
+    memcpy(block, &inode, sizeof(inode));
+
+    time_t current_time = time(NULL);
+    inode.mtime = current_time;
+    
+    if (block_write(block, inum, 1) != 0) 
+    {
+        return -EIO;
+    }
+    return 0;
 }
 
 int fs_utime(const char *path, struct utimbuf *ut)
