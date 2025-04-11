@@ -40,6 +40,43 @@ START_TEST(test_getattr_file_1k)
 }
 END_TEST
 
+
+struct {
+    const char *name;
+    int seen;
+} root_dir_table[] = {
+    {"dir2", 0},
+    {"dir3", 0},
+    {"dir-with-long-name", 0},
+    {"file.10", 0},
+    {"file.1k", 0},
+    {"file.8k+", 0},
+    {NULL, 0}
+};
+
+int readdir_filler_rootdir(void *ptr, const char *name, const struct stat *stbuf, off_t off)
+{
+    for (int i = 0; root_dir_table[i].name != NULL; i++) {
+        if (strcmp(name, root_dir_table[i].name) == 0) {
+            root_dir_table[i].seen = 1;
+            return 0;
+        }
+    }
+    return 0;
+}
+
+START_TEST(test_readdir_root)
+{
+    int rv = fs_ops.readdir("/", NULL, readdir_filler_rootdir, 0, NULL);
+    ck_assert_int_eq(rv, 0);
+
+    for (int i = 0; root_dir_table[i].name != NULL; i++) {
+        ck_assert(root_dir_table[i].seen);
+        root_dir_table[i].seen = 0;
+    }
+}
+END_TEST
+
 START_TEST(test_read_file_1k)
 {
     char buf[15000];
@@ -68,8 +105,7 @@ END_TEST
 
 /* this is an example of a callback function for readdir
  */
-int empty_filler(void *ptr, const char *name, const struct stat *stbuf,
-                 off_t off)
+int empty_filler(void *ptr, const char *name, const struct stat *stbuf, off_t off)
 {
     /* FUSE passes you the entry name and a pointer to a 'struct stat' 
      * with the attributes. Ignore the 'ptr' and 'off' arguments 
@@ -97,6 +133,7 @@ int main(int argc, char **argv)
 
     tcase_add_test(tc, a_test); /* see START_TEST above */
     tcase_add_test(tc, test_getattr_file_1k);
+    tcase_add_test(tc, test_readdir_root);
     tcase_add_test(tc, test_read_file_1k);
     tcase_add_test(tc, test_statfs_values);
 

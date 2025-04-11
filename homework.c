@@ -421,6 +421,8 @@ int fs_truncate(const char *path, off_t len)
  *   - on error, return <0
  * Errors - path resolution, ENOENT, EISDIR
  */
+
+ //TODO: change error return values to match the assignment
 int fs_read(const char *path, char *buf, size_t len, off_t offset, struct fuse_file_info *fi)
 {
     uint32_t inum;
