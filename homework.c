@@ -156,7 +156,21 @@ int translate(const char *path, uint32_t *inum, struct fs_inode *inode)
     char *components[MAX_PATH_LEN];
     int num_components = pathparse(path, components);
     uint32_t current_inum = 2;
-    uint32_t parent_inum = 2;
+    
+    
+    uint32_t parent_stack[MAX_PATH_LEN]; // Stack to keep track of parent inodes
+    int stack_pos = 0;
+    parent_stack[0] = 2; // Root's parent is itself
+
+    // Handle the case where the path is empty ("") or path is ("/")
+    if (num_components == 0) {
+        if (read_inode(current_inum, inode) != 0) {
+            perror("In translate: read_inode failed for root");
+            return -EIO;
+        }
+        *inum = current_inum;
+        return 0;
+    }
 
     for (int i = 0; i < num_components; i++) 
     {
@@ -165,8 +179,11 @@ int translate(const char *path, uint32_t *inum, struct fs_inode *inode)
         }
 
         if (strcmp(components[i], "..") == 0) {
-            current_inum = parent_inum;
-            continue;
+            if (stack_pos > 0) {
+                stack_pos--; // Pop from the stack
+                current_inum = parent_stack[stack_pos]; // Go to parent
+            }
+            continue; // Skip other processing for ".."
         }
 
         struct fs_inode current_inode;
@@ -195,8 +212,9 @@ int translate(const char *path, uint32_t *inum, struct fs_inode *inode)
             {
                 if (entries[k].valid && strcmp(entries[k].name, components[i]) == 0) 
                 {
-                    parent_inum = current_inum;
-                    current_inum = entries[k].inode;
+                    parent_stack[stack_pos + 1] = current_inum; // Push current onto stack
+                    stack_pos++; // Increment stack position
+                    current_inum = entries[k].inode; // Navigate to new directory
                     found = 1;
                     break;
                 }
@@ -391,6 +409,106 @@ int fs_rmdir(const char *path)
 int fs_rename(const char *src_path, const char *dst_path)
 {
     /* your code here */
+    uint32_t src_inum;
+    struct fs_inode src_inode;
+    if (translate(src_path, &src_inum, &src_inode) != 0)
+    {
+        return -ENOENT;
+    }
+
+    char *src_dup = strdup(src_path);
+    char *dst_dup = strdup(dst_path);
+
+    char *src_components[MAX_PATH_LEN], *dst_components[MAX_PATH_LEN];
+
+    int src_count = pathparse(src_dup, src_components);
+    int dst_count = pathparse(dst_dup, dst_components);
+    free(src_dup);
+    free(dst_dup);
+
+    char *src_name = src_components[src_count - 1];
+    char *dst_name = dst_components[dst_count - 1];
+
+    char parent_path[512];
+    char *last_slash = strrchr(src_path, '/');
+
+    if (last_slash) {
+        size_t length = last_slash - src_path;
+        strncpy(parent_path, src_path, length);
+        parent_path[length] = '\0';
+    } else {
+        strcpy(parent_path, "");
+    }
+
+    uint32_t parent_inum;
+    struct fs_inode parent_inode;
+
+    const char *resolved_path = (parent_path[0] == '\0') ? "/" : parent_path;
+    int res = translate(resolved_path, &parent_inum, &parent_inode);
+    if (res != 0) 
+    {
+        return res;
+    }
+
+    if (!S_ISDIR(parent_inode.mode)) 
+    {
+        return -ENOTDIR;
+    }
+
+    struct fs_dirent *src_entry = NULL;
+    struct fs_dirent *dst_entry = NULL;
+    // int src_index = -1;
+
+    for (int i = 0; i < parent_inode.size / FS_BLOCK_SIZE; i++) 
+    {
+        char block[FS_BLOCK_SIZE];
+        if (block_read(block, parent_inode.ptrs[i], 1) != 0) 
+        {
+            perror("In fs_rename: block read failed");
+            return -EIO;
+        }
+        struct fs_dirent *entries = (struct fs_dirent *)block;
+        for (int j = 0; j < FS_BLOCK_SIZE / sizeof(struct fs_dirent); j++) 
+        {
+            if (!entries[j].valid) 
+            {
+                continue;
+            }
+            if (strcmp(entries[j].name, src_name) == 0) 
+            {
+                src_entry = &entries[j];
+                // src_index = j;
+            } 
+            else if (strcmp(entries[j].name, dst_name) == 0) 
+            {
+                dst_entry = &entries[j];
+            }
+        }
+        if (!src_entry) 
+        {
+            return -ENOENT;
+        }
+
+        if (src_entry && dst_entry) 
+        {
+            return -EEXIST;
+        }
+
+        if (src_entry && !dst_entry) 
+        {
+            strncpy(src_entry->name, dst_name, MAX_NAME_LEN); // Rename source entry
+            src_entry->name[MAX_NAME_LEN - 1] = '\0'; // Ensure null termination
+
+            if (block_write(block, parent_inode.ptrs[i], 1) != 0) 
+            {
+                perror("In fs_rename: block write failed");
+                return -EIO;
+            }
+
+            return 0; // Rename successful
+        }
+    }
+    
     return -EOPNOTSUPP;
 }
 
@@ -408,17 +526,19 @@ int fs_chmod(const char *path, mode_t mode)
     int res = translate(path, &inum, &inode);
     if (res != 0) 
     {
+        perror("In fs_chmod: translate failed");
         return res;
     }
     inode.mode = (inode.mode & S_IFMT) | (mode & 0777);
     char block[FS_BLOCK_SIZE];
     memcpy(block, &inode, sizeof(inode));
 
-    time_t current_time = time(NULL);
-    inode.mtime = current_time;
+    // time_t current_time = time(NULL);
+    // inode.mtime = current_time;
     
     if (block_write(block, inum, 1) != 0) 
     {
+        perror("In fs_chmod: block write failed");
         return -EIO;
     }
     return 0;

@@ -40,6 +40,18 @@ START_TEST(test_getattr_file_1k)
 }
 END_TEST
 
+START_TEST(test_getattr_file_1k_deeppath)
+{
+    struct stat st;
+    int rv = fs_ops.getattr("/dir3/subdir/../../file.1k", &st);
+    ck_assert_int_eq(rv, 0);
+    ck_assert_int_eq(st.st_uid, 500);
+    ck_assert_int_eq(st.st_gid, 500);
+    ck_assert(S_ISREG(st.st_mode));
+    ck_assert_int_eq(st.st_size, 1000);
+}
+END_TEST
+
 
 struct {
     const char *name;
@@ -145,6 +157,7 @@ int main(int argc, char **argv)
 
     tcase_add_test(tc, a_test); /* see START_TEST above */
     tcase_add_test(tc, test_getattr_file_1k);
+    tcase_add_test(tc, test_getattr_file_1k_deeppath);
     tcase_add_test(tc, test_readdir_root);
     tcase_add_test(tc, test_read_file_1k);
     tcase_add_test(tc, test_statfs_values);

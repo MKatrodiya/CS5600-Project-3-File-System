@@ -58,3 +58,5 @@ __pycache__
 hw3fuse
 test.img
 unittest-1
+
+mytest.c
