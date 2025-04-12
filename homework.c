@@ -180,10 +180,10 @@ int translate(const char *path, uint32_t *inum, struct fs_inode *inode)
 
         if (strcmp(components[i], "..") == 0) {
             if (stack_pos > 0) {
-                stack_pos--; // Pop from the stack
+                stack_pos--;
                 current_inum = parent_stack[stack_pos]; // Go to parent
             }
-            continue; // Skip other processing for ".."
+            continue;
         }
 
         struct fs_inode current_inode;
@@ -212,9 +212,9 @@ int translate(const char *path, uint32_t *inum, struct fs_inode *inode)
             {
                 if (entries[k].valid && strcmp(entries[k].name, components[i]) == 0) 
                 {
-                    parent_stack[stack_pos + 1] = current_inum; // Push current onto stack
-                    stack_pos++; // Increment stack position
-                    current_inum = entries[k].inode; // Navigate to new directory
+                    parent_stack[stack_pos + 1] = current_inum;
+                    stack_pos++;
+                    current_inum = entries[k].inode;
                     found = 1;
                     break;
                 }
