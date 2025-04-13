@@ -126,6 +126,44 @@ START_TEST(test_chmod_file_1k)
 }
 END_TEST
 
+START_TEST(test_rename_file10)
+{
+    // Test basic rename functionality
+    int rv = fs_ops.rename("/file.10", "/new_file.10");
+    ck_assert_int_eq(rv, 0);
+    
+    // Verify the file was renamed by checking if old name doesn't exist
+    struct stat st_old;
+    rv = fs_ops.getattr("/file.10", &st_old);
+    ck_assert_int_eq(rv, -ENOENT);
+    
+    // Verify the new file exists with the same attributes
+    struct stat st_new;
+    rv = fs_ops.getattr("/new_file.10", &st_new);
+    ck_assert_int_eq(rv, 0);
+    ck_assert_int_eq(st_new.st_size, 10);
+    ck_assert_int_eq(st_new.st_uid, 500);
+    ck_assert_int_eq(st_new.st_gid, 500);
+    ck_assert(S_ISREG(st_new.st_mode));
+    
+    // Rename back for other tests that might need the original file
+    rv = fs_ops.rename("/new_file.10", "/file.10");
+    ck_assert_int_eq(rv, 0);
+    
+    // Test rename with path traversal (../ components)
+    rv = fs_ops.rename("/dir2/../file.10", "/dir3/../file.10");
+    ck_assert_int_eq(rv, 0);
+    
+    // Test error case: destination already exists
+    rv = fs_ops.rename("/file.10", "/file.1k");
+    ck_assert_int_eq(rv, -EEXIST);
+    
+    // Test error case: different directories
+    rv = fs_ops.rename("/file.10", "/dir2/file.10");
+    ck_assert_int_eq(rv, -EINVAL);
+}
+END_TEST
+
 
 /* this is an example of a callback function for readdir
  */
@@ -162,6 +200,7 @@ int main(int argc, char **argv)
     tcase_add_test(tc, test_read_file_1k);
     tcase_add_test(tc, test_statfs_values);
     tcase_add_test(tc, test_chmod_file_1k);
+    tcase_add_test(tc, test_rename_file10);
 
     suite_add_tcase(s, tc);
     SRunner *sr = srunner_create(s);

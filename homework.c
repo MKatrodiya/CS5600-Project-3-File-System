@@ -239,6 +239,45 @@ int translate(const char *path, uint32_t *inum, struct fs_inode *inode)
     return 0;
 }
 
+int resolve_path(char **components, int num_components, char **resolved) 
+{
+    if (num_components <= 0) {
+        return 0;
+    }
+
+    int resolved_index = 0;
+    for (int i = 0; i < num_components; i++) 
+    {
+        if (strcmp(components[i], ".") == 0) 
+        {
+            continue;
+        }
+
+        if (strcmp(components[i], "..") == 0) 
+        {
+            if (resolved_index > 0) 
+            {
+                free(resolved[resolved_index - 1]);
+                resolved_index--;
+            }
+            continue;
+        }
+
+        resolved[resolved_index] = strdup(components[i]);
+        if (!resolved[resolved_index]) 
+        {
+            for (int j = 0; j < resolved_index; j++) 
+            {
+                free(resolved[j]);
+            }
+            return -1;
+        }
+        resolved_index++;
+    }
+    
+    return resolved_index;
+}
+
 
 /* getattr - get file or directory attributes. For a description of
  *  the fields in 'struct stat', see 'man lstat'.
@@ -408,7 +447,6 @@ int fs_rmdir(const char *path)
  */
 int fs_rename(const char *src_path, const char *dst_path)
 {
-    /* your code here */
     uint32_t src_inum;
     struct fs_inode src_inode;
     if (translate(src_path, &src_inum, &src_inode) != 0)
@@ -416,35 +454,43 @@ int fs_rename(const char *src_path, const char *dst_path)
         return -ENOENT;
     }
 
-    char *src_dup = strdup(src_path);
-    char *dst_dup = strdup(dst_path);
-
     char *src_components[MAX_PATH_LEN], *dst_components[MAX_PATH_LEN];
+    int src_count = pathparse(src_path, src_components);
+    int dst_count = pathparse(dst_path, dst_components);
 
-    int src_count = pathparse(src_dup, src_components);
-    int dst_count = pathparse(dst_dup, dst_components);
-    free(src_dup);
-    free(dst_dup);
+    char *resolved_srcpath[MAX_PATH_LEN], *resolved_dstpath[MAX_PATH_LEN];
+    int resolved_count_src = resolve_path(src_components, src_count, resolved_srcpath);
+    int resolved_count_dst = resolve_path(dst_components, dst_count, resolved_dstpath);
 
-    char *src_name = src_components[src_count - 1];
-    char *dst_name = dst_components[dst_count - 1];
+    char *src_name = resolved_srcpath[resolved_count_src - 1];
+    char *dst_name = resolved_dstpath[resolved_count_dst - 1];
 
-    char parent_path[512];
-    char *last_slash = strrchr(src_path, '/');
+    char parent_src_path[256] = "/";
+    char parent_dst_path[256] = "/";
+    
+    for (int i = 0; i < resolved_count_src - 1; i++) {
+        strcat(parent_src_path, resolved_srcpath[i]);
+    }
+    for (int i = 0; i < resolved_count_dst - 1; i++) {
+        strcat(parent_dst_path, resolved_dstpath[i]);
+    }
 
-    if (last_slash) {
-        size_t length = last_slash - src_path;
-        strncpy(parent_path, src_path, length);
-        parent_path[length] = '\0';
-    } else {
-        strcpy(parent_path, "");
+    uint32_t src_parent_inum, dst_parent_inum;
+    struct fs_inode dummy_inode;
+
+    
+    if (translate(parent_src_path, &src_parent_inum, &dummy_inode) != 0 ||
+        translate(parent_dst_path, &dst_parent_inum, &dummy_inode) != 0) {
+        return -ENOENT;
+    }
+
+    if (src_parent_inum != dst_parent_inum) {
+        return -EINVAL;
     }
 
     uint32_t parent_inum;
     struct fs_inode parent_inode;
-
-    const char *resolved_path = (parent_path[0] == '\0') ? "/" : parent_path;
-    int res = translate(resolved_path, &parent_inum, &parent_inode);
+    int res = translate(parent_src_path, &parent_inum, &parent_inode);
     if (res != 0) 
     {
         return res;
@@ -457,7 +503,6 @@ int fs_rename(const char *src_path, const char *dst_path)
 
     struct fs_dirent *src_entry = NULL;
     struct fs_dirent *dst_entry = NULL;
-    // int src_index = -1;
 
     for (int i = 0; i < parent_inode.size / FS_BLOCK_SIZE; i++) 
     {
@@ -477,18 +522,13 @@ int fs_rename(const char *src_path, const char *dst_path)
             if (strcmp(entries[j].name, src_name) == 0) 
             {
                 src_entry = &entries[j];
-                // src_index = j;
             } 
             else if (strcmp(entries[j].name, dst_name) == 0) 
             {
                 dst_entry = &entries[j];
             }
         }
-        if (!src_entry) 
-        {
-            return -ENOENT;
-        }
-
+        
         if (src_entry && dst_entry) 
         {
             return -EEXIST;
@@ -505,7 +545,7 @@ int fs_rename(const char *src_path, const char *dst_path)
                 return -EIO;
             }
 
-            return 0; // Rename successful
+            return 0;
         }
     }
     
