@@ -221,17 +221,16 @@ START_TEST(test_chmod_file_and_dir)
 END_TEST
 
 
-START_TEST(test_rename_file10)
+START_TEST(test_rename_file_and_directory)
 {
+    // --- Rename file and check ---
     int rv = fs_ops.rename("/file.10", "/new_file.10");
     ck_assert_int_eq(rv, 0);
-    
-    // Verify the file was renamed by checking if old name doesn't exist
+
     struct stat st_old;
     rv = fs_ops.getattr("/file.10", &st_old);
-    ck_assert_int_eq(rv, -ENOENT);
-    
-    // Verify the new file exists with the same attributes
+    ck_assert_msg(rv == -ENOENT, "Old file '/file.10' still exists after rename");
+
     struct stat st_new;
     rv = fs_ops.getattr("/new_file.10", &st_new);
     ck_assert_int_eq(rv, 0);
@@ -239,36 +238,38 @@ START_TEST(test_rename_file10)
     ck_assert_int_eq(st_new.st_uid, 500);
     ck_assert_int_eq(st_new.st_gid, 500);
     ck_assert(S_ISREG(st_new.st_mode));
-    
+
     // Rename back
     rv = fs_ops.rename("/new_file.10", "/file.10");
     ck_assert_int_eq(rv, 0);
-    
-    // Test rename with .. path traversal
-    rv = fs_ops.rename("/dir2/../file.10", "/dir3/../file.10");
-    ck_assert_int_eq(rv, 0);
-    
-    // Test error case: destination already exists
-    rv = fs_ops.rename("/file.10", "/file.1k");
+
+    rv = fs_ops.rename("/dir2/../file.10", "/dir3/../file.10"); // rename using path traversal with ..
+    ck_assert_msg(rv == 0, "Rename with '..' path traversal failed");
+
+    rv = fs_ops.rename("/file.10", "/file.1k"); // rename to existing file
     ck_assert_int_eq(rv, -EEXIST);
-    
-    // Test error case: different directories
-    rv = fs_ops.rename("/file.10", "/dir2/file.10");
+
+    rv = fs_ops.rename("/file.10", "/dir2/file.10"); // rename across directories (invalid)
     ck_assert_int_eq(rv, -EINVAL);
+
+    // --- Rename directory ---
+    rv = fs_ops.rename("/dir-with-long-name", "/renamed-dir");
+    ck_assert_int_eq(rv, 0);
+
+    rv = fs_ops.getattr("/dir-with-long-name", &st_old); // make sure old name is not present
+    ck_assert_int_eq(rv, -ENOENT);
+
+    char path[256] = "/renamed-dir/file.12k+"; // make sure file inside renamed dir is still there
+    struct stat st_inside;
+    rv = fs_ops.getattr(path, &st_inside);
+    ck_assert_int_eq(rv, 0);
+    ck_assert_int_eq(st_inside.st_size, 12289);
+    ck_assert(S_ISREG(st_inside.st_mode));
+
+    rv = fs_ops.rename("/renamed-dir", "/dir-with-long-name");  // Rename directory back
+    ck_assert_int_eq(rv, 0);
 }
 END_TEST
-
-
-/* this is an example of a callback function for readdir
- */
-int empty_filler(void *ptr, const char *name, const struct stat *stbuf, off_t off)
-{
-    /* FUSE passes you the entry name and a pointer to a 'struct stat' 
-     * with the attributes. Ignore the 'ptr' and 'off' arguments 
-     * 
-     */
-    return 0;
-}
 
 /* note that your tests will call:
  *  fs_ops.getattr(path, struct stat *sb)
@@ -276,7 +277,6 @@ int empty_filler(void *ptr, const char *name, const struct stat *stbuf, off_t of
  *  fs_ops.read(path, buf, len, offset, NULL);
  *  fs_ops.statfs(path, struct statvfs *sv);
  */
-
 
 
 int main(int argc, char **argv)
@@ -295,7 +295,7 @@ int main(int argc, char **argv)
     tcase_add_test(tc, test_read_file_1k_chunks);
     tcase_add_test(tc, test_statfs_values);
     tcase_add_test(tc, test_chmod_file_and_dir);
-    tcase_add_test(tc, test_rename_file10);
+    tcase_add_test(tc, test_rename_file_and_directory);
 
     suite_add_tcase(s, tc);
     SRunner *sr = srunner_create(s);
