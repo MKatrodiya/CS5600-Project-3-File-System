@@ -91,7 +91,7 @@ struct {
 struct {
     const char *name;
     int seen;
-} entry_table[20]; // Max 20 entries per test
+} entry_table[20]; // max 20 entries per test
 
 int readdir_filler_check(void *ptr, const char *name, const struct stat *stbuf, off_t off)
 {
@@ -133,8 +133,6 @@ START_TEST(test_readdir_all_dirs)
 }
 END_TEST
 
-
-// Utility function to read a file in chunks and return final checksum
 unsigned read_file_in_chunks(const char *path, int size, int chunk_size)
 {
     char big_buf[20000]; // large enough for all files
@@ -156,7 +154,6 @@ unsigned read_file_in_chunks(const char *path, int size, int chunk_size)
     return crc32(0, (unsigned char *)big_buf, size);
 }
 
-// Simple big read test
 START_TEST(test_read_file_1k_big)
 {
     char buf[20000]; // bigger than max file
@@ -168,7 +165,6 @@ START_TEST(test_read_file_1k_big)
 }
 END_TEST
 
-// Multi-chunk read test with various chunk sizes
 START_TEST(test_read_file_1k_chunks)
 {
     int file_size = 1000;
@@ -188,29 +184,42 @@ START_TEST(test_statfs_values)
     int rv = fs_ops.statfs("/", &sv);
     ck_assert_int_eq(rv, 0);
 
-    ck_assert_int_eq(sv.f_bsize, 4096);       // block size in bytes
-    ck_assert_int_eq(sv.f_blocks, 400);       // total number of blocks
-    ck_assert_int_eq(sv.f_bfree, 355);        // free blocks
-    ck_assert_int_eq(sv.f_bavail, 355);       // available blocks = free blocks
-    ck_assert_int_eq(sv.f_namemax, 27);       // max file name length
+    ck_assert_int_eq(sv.f_bsize, 4096);
+    ck_assert_int_eq(sv.f_blocks, 398); // total number of blocks // f_blocks = total image - (superblock + block map)
+    ck_assert_int_eq(sv.f_bfree, 353); // free blocks // -2 for superblock and bitmap
+    ck_assert_int_eq(sv.f_bavail, 353); // available blocks = free blocks // -2 for superblock and bitmap
+    ck_assert_int_eq(sv.f_namemax, 27);
 }
 END_TEST
 
 
-START_TEST(test_chmod_file_1k)
+START_TEST(test_chmod_file_and_dir)
 {
-    int rv = fs_ops.chmod("/file.1k", 0755);
-    ck_assert_int_eq(rv, 0);
+    int rv_file = fs_ops.chmod("/file.1k", 0755);
+    ck_assert_int_eq(rv_file, 0);
 
-    struct stat st;
-    int rv2 = fs_ops.getattr("/file.1k", &st);
-    ck_assert_int_eq(rv2, 0);
-    ck_assert_int_eq(st.st_mode & 0777, 0755);
+    struct stat st_file;
+    int rv_get_file = fs_ops.getattr("/file.1k", &st_file);
+    ck_assert_int_eq(rv_get_file, 0);
+    ck_assert(S_ISREG(st_file.st_mode));                  
+    ck_assert_int_eq(st_file.st_mode & 0777, 0755);      
+    
+    ck_assert_int_eq(fs_ops.chmod("/file.1k", 0666), 0); // Revert permissions
 
-    int rv3 = fs_ops.chmod("/file.1k", 0666);
-    ck_assert_int_eq(rv3, 0);
+    // chmod on a directory
+    int rv_dir = fs_ops.chmod("/dir2", 0700);
+    ck_assert_int_eq(rv_dir, 0);
+
+    struct stat st_dir;
+    int rv_get_dir = fs_ops.getattr("/dir2", &st_dir);
+    ck_assert_int_eq(rv_get_dir, 0);
+    ck_assert(S_ISDIR(st_dir.st_mode));        
+    ck_assert_int_eq(st_dir.st_mode & 0777, 0700);
+
+    ck_assert_int_eq(fs_ops.chmod("/dir2", 0777), 0); // Revert permissions
 }
 END_TEST
+
 
 START_TEST(test_rename_file10)
 {
@@ -285,7 +294,7 @@ int main(int argc, char **argv)
     tcase_add_test(tc, test_read_file_1k_big);
     tcase_add_test(tc, test_read_file_1k_chunks);
     tcase_add_test(tc, test_statfs_values);
-    tcase_add_test(tc, test_chmod_file_1k);
+    tcase_add_test(tc, test_chmod_file_and_dir);
     tcase_add_test(tc, test_rename_file10);
 
     suite_add_tcase(s, tc);
