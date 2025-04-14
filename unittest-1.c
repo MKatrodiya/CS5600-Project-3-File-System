@@ -134,14 +134,51 @@ START_TEST(test_readdir_all_dirs)
 END_TEST
 
 
-START_TEST(test_read_file_1k)
+// Utility function to read a file in chunks and return final checksum
+unsigned read_file_in_chunks(const char *path, int size, int chunk_size)
 {
-    char buf[10000];
-    int rv = fs_ops.read("/file.1k", buf, 1000, 0, NULL);
-    ck_assert_int_eq(rv, 1000);
+    char big_buf[20000]; // large enough for all files
+    char tmp_buf[4096];  // buffer for each read
+    int total_read = 0;
+
+    while (total_read < size) {
+        int to_read = chunk_size;
+        if (total_read + to_read > size)
+            to_read = size - total_read;
+
+        int rv = fs_ops.read(path, tmp_buf, to_read, total_read, NULL);
+        ck_assert_msg(rv == to_read, "read %d bytes at offset %d failed (got %d)", to_read, total_read, rv);
+
+        memcpy(big_buf + total_read, tmp_buf, rv);
+        total_read += rv;
+    }
+
+    return crc32(0, (unsigned char *)big_buf, size);
+}
+
+// Simple big read test
+START_TEST(test_read_file_1k_big)
+{
+    char buf[20000]; // bigger than max file
+    int rv = fs_ops.read("/file.1k", buf, sizeof(buf), 0, NULL);
+    ck_assert_msg(rv == 1000, "expected to read 1000 bytes, got %d", rv);
 
     unsigned cksum = crc32(0, (unsigned char *)buf, 1000);
     ck_assert_int_eq(cksum, 1726121896);
+}
+END_TEST
+
+// Multi-chunk read test with various chunk sizes
+START_TEST(test_read_file_1k_chunks)
+{
+    int file_size = 1000;
+    unsigned expected_cksum = 1726121896;
+    int chunk_sizes[] = {17, 100, 1000, 1024, 1970, 3000};
+
+    for (int i = 0; i < sizeof(chunk_sizes)/sizeof(int); i++) {
+        unsigned cksum = read_file_in_chunks("/file.1k", file_size, chunk_sizes[i]);
+        ck_assert_msg(cksum == expected_cksum, "checksum mismatch with chunk size %d (got %u)", chunk_sizes[i], cksum);
+    }
 }
 END_TEST
 
@@ -151,13 +188,14 @@ START_TEST(test_statfs_values)
     int rv = fs_ops.statfs("/", &sv);
     ck_assert_int_eq(rv, 0);
 
-    ck_assert_int_eq(sv.f_bsize, FS_BLOCK_SIZE);
-    ck_assert(sv.f_blocks > 0);
-    ck_assert(sv.f_bfree <= sv.f_blocks);
-    ck_assert_int_eq(sv.f_bavail, sv.f_bfree);
-    ck_assert_int_eq(sv.f_namemax, MAX_NAME_LEN);
+    ck_assert_int_eq(sv.f_bsize, 4096);       // block size in bytes
+    ck_assert_int_eq(sv.f_blocks, 400);       // total number of blocks
+    ck_assert_int_eq(sv.f_bfree, 355);        // free blocks
+    ck_assert_int_eq(sv.f_bavail, 355);       // available blocks = free blocks
+    ck_assert_int_eq(sv.f_namemax, 27);       // max file name length
 }
 END_TEST
+
 
 START_TEST(test_chmod_file_1k)
 {
@@ -234,6 +272,8 @@ int empty_filler(void *ptr, const char *name, const struct stat *stbuf, off_t of
 
 int main(int argc, char **argv)
 {
+    system("python gen-disk.py -q disk1.in test.img");
+
     block_init("test.img");
     fs_ops.init(NULL);
     
@@ -242,7 +282,8 @@ int main(int argc, char **argv)
 
     tcase_add_test(tc, test_getattr_all);
     tcase_add_test(tc, test_readdir_all_dirs);
-    tcase_add_test(tc, test_read_file_1k);
+    tcase_add_test(tc, test_read_file_1k_big);
+    tcase_add_test(tc, test_read_file_1k_chunks);
     tcase_add_test(tc, test_statfs_values);
     tcase_add_test(tc, test_chmod_file_1k);
     tcase_add_test(tc, test_rename_file10);
