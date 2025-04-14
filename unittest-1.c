@@ -20,74 +20,119 @@
 extern struct fuse_operations fs_ops;
 extern void block_init(char *file);
 
-
-/* change test name and make it do something useful */
-START_TEST(a_test)
+START_TEST(test_getattr_all)
 {
-    ck_assert_int_eq(1, 1);
+    struct {
+        const char *path;
+        int uid, gid;
+        mode_t mode;
+        off_t size;
+        time_t ctime, mtime;
+        int expect_success;
+        int expected_errno;
+    } cases[] = {
+        // Valid entries
+        // path uid gid mode size ctime mtime expect_success expected_errno
+        {"/", 0, 0, 040777, 4096, 1565283152, 1565283167, 1, 0},
+        {"/file.1k", 500, 500, 0100666, 1000, 1565283152, 1565283152, 1, 0},
+        {"/file.10", 500, 500, 0100666, 10, 1565283152, 1565283167, 1, 0},
+        {"/dir-with-long-name", 0, 0, 040777, 4096, 1565283152, 1565283167, 1, 0},
+        {"/dir-with-long-name/file.12k+", 0, 500, 0100666, 12289, 1565283152, 1565283167, 1, 0},
+        {"/dir2", 500, 500, 040777, 8192, 1565283152, 1565283167, 1, 0},
+        {"/dir2/twenty-seven-byte-file-name", 500, 500, 0100666, 1000, 1565283152, 1565283167, 1, 0},
+        {"/dir2/file.4k+", 500, 500, 0100777, 4098, 1565283152, 1565283167, 1, 0},
+        {"/dir3", 0, 500, 040777, 4096, 1565283152, 1565283167, 1, 0},
+        {"/dir3/subdir", 0, 500, 040777, 4096, 1565283152, 1565283167, 1, 0},
+        {"/dir3/subdir/file.4k-", 500, 500, 0100666, 4095, 1565283152, 1565283167, 1, 0},
+        {"/dir3/subdir/file.8k-", 500, 500, 0100666, 8190, 1565283152, 1565283167, 1, 0},
+        {"/dir3/subdir/file.12k", 500, 500, 0100666, 12288, 1565283152, 1565283167, 1, 0},
+        {"/dir3/file.12k-", 0, 500, 0100777, 12287, 1565283152, 1565283167, 1, 0},
+        {"/file.8k+", 500, 500, 0100666, 8195, 1565283152, 1565283167, 1, 0},
+        // Deep path (relative traversal)
+        {"/dir3/subdir/../.././file.1k", 500, 500, 0100666, 1000, 1565283152, 1565283152, 1, 0},
+        // Error cases
+        {"/not-a-file", 0, 0, 0, 0, 0, 0, 0, -ENOENT},
+        {"/file.1k/file.0", 0, 0, 0, 0, 0, 0, 0, -ENOTDIR},
+        {"/not-a-dir/file.0", 0, 0, 0, 0, 0, 0, 0, -ENOENT},
+        {"/dir2/not-a-file", 0, 0, 0, 0, 0, 0, 0, -ENOENT}
+    };
+
+    for (size_t i = 0; i < sizeof(cases)/sizeof(cases[0]); ++i) {
+        struct stat st;
+        int rv = fs_ops.getattr(cases[i].path, &st);
+        if (cases[i].expect_success) {
+            ck_assert_msg(rv == 0, "getattr failed for path %s", cases[i].path);
+            ck_assert_int_eq(st.st_uid, cases[i].uid);
+            ck_assert_int_eq(st.st_gid, cases[i].gid);
+            ck_assert_int_eq(st.st_mode & 0777, cases[i].mode & 0777);
+            ck_assert(S_ISDIR(cases[i].mode) ? S_ISDIR(st.st_mode) : S_ISREG(st.st_mode));
+            ck_assert_int_eq(st.st_size, cases[i].size);
+            ck_assert_int_eq(st.st_ctime, cases[i].ctime);
+            ck_assert_int_eq(st.st_mtime, cases[i].mtime);
+        } else {
+            ck_assert_msg(rv == cases[i].expected_errno, "Expected error for path %s", cases[i].path);
+        }
+    }
 }
 END_TEST
 
-START_TEST(test_getattr_file_1k)
-{
-    struct stat st;
-    int rv = fs_ops.getattr("/file.1k", &st);
-    ck_assert_int_eq(rv, 0);
-    ck_assert_int_eq(st.st_uid, 500);
-    ck_assert_int_eq(st.st_gid, 500);
-    ck_assert(S_ISREG(st.st_mode));
-    ck_assert_int_eq(st.st_size, 1000);
-}
-END_TEST
-
-START_TEST(test_getattr_file_1k_deeppath)
-{
-    struct stat st;
-    int rv = fs_ops.getattr("/dir3/subdir/../../file.1k", &st);
-    ck_assert_int_eq(rv, 0);
-    ck_assert_int_eq(st.st_uid, 500);
-    ck_assert_int_eq(st.st_gid, 500);
-    ck_assert(S_ISREG(st.st_mode));
-    ck_assert_int_eq(st.st_size, 1000);
-}
-END_TEST
-
+struct {
+    const char *dir;
+    const char *entries[10];
+} dir_contents[] = {
+    {"/", {"dir2", "dir3", "dir-with-long-name", "file.10", "file.1k", "file.8k+", NULL}},
+    {"/dir2", {"twenty-seven-byte-file-name", "file.4k+", NULL}},
+    {"/dir3", {"subdir", "file.12k-", NULL}},
+    {"/dir3/subdir", {"file.4k-", "file.8k-", "file.12k", NULL}},
+    {"/dir-with-long-name", {"file.12k+", NULL}},
+    {NULL, {NULL}}
+};
 
 struct {
     const char *name;
     int seen;
-} root_dir_table[] = {
-    {"dir2", 0},
-    {"dir3", 0},
-    {"dir-with-long-name", 0},
-    {"file.10", 0},
-    {"file.1k", 0},
-    {"file.8k+", 0},
-    {NULL, 0}
-};
+} entry_table[20]; // Max 20 entries per test
 
-int readdir_filler_rootdir(void *ptr, const char *name, const struct stat *stbuf, off_t off)
+int readdir_filler_check(void *ptr, const char *name, const struct stat *stbuf, off_t off)
 {
-    for (int i = 0; root_dir_table[i].name != NULL; i++) {
-        if (strcmp(name, root_dir_table[i].name) == 0) {
-            root_dir_table[i].seen = 1;
+    for (int i = 0; entry_table[i].name != NULL; i++) {
+        if (strcmp(name, entry_table[i].name) == 0) {
+            entry_table[i].seen = 1;
             return 0;
         }
     }
     return 0;
 }
 
-START_TEST(test_readdir_root)
+START_TEST(test_readdir_all_dirs)
 {
-    int rv = fs_ops.readdir("/", NULL, readdir_filler_rootdir, 0, NULL);
-    ck_assert_int_eq(rv, 0);
+    for (int d = 0; dir_contents[d].dir != NULL; d++) {
+        // fill entry table for this dir
+        int i;
+        for (i = 0; dir_contents[d].entries[i] != NULL; i++) {
+            entry_table[i].name = dir_contents[d].entries[i];
+            entry_table[i].seen = 0;
+        }
+        entry_table[i].name = NULL; // null-terminate
 
-    for (int i = 0; root_dir_table[i].name != NULL; i++) {
-        ck_assert(root_dir_table[i].seen);
-        root_dir_table[i].seen = 0;
+        int rv = fs_ops.readdir(dir_contents[d].dir, NULL, readdir_filler_check, 0, NULL);
+        ck_assert_msg(rv == 0, "readdir failed for dir %s", dir_contents[d].dir);
+
+        for (i = 0; entry_table[i].name != NULL; i++) {
+            ck_assert_msg(entry_table[i].seen, "entry '%s' missing in dir '%s'", entry_table[i].name, dir_contents[d].dir);
+        }
     }
+
+    // non-existent path (ENOENT)
+    int rv = fs_ops.readdir("/no-path", NULL, readdir_filler_check, 0, NULL);
+    ck_assert_int_eq(rv, -ENOENT);
+
+    // call readdir on a file (ENOTDIR)
+    rv = fs_ops.readdir("/file.1k", NULL, readdir_filler_check, 0, NULL);
+    ck_assert_int_eq(rv, -ENOTDIR);
 }
 END_TEST
+
 
 START_TEST(test_read_file_1k)
 {
@@ -123,12 +168,14 @@ START_TEST(test_chmod_file_1k)
     int rv2 = fs_ops.getattr("/file.1k", &st);
     ck_assert_int_eq(rv2, 0);
     ck_assert_int_eq(st.st_mode & 0777, 0755);
+
+    int rv3 = fs_ops.chmod("/file.1k", 0666);
+    ck_assert_int_eq(rv3, 0);
 }
 END_TEST
 
 START_TEST(test_rename_file10)
 {
-    // Test basic rename functionality
     int rv = fs_ops.rename("/file.10", "/new_file.10");
     ck_assert_int_eq(rv, 0);
     
@@ -146,11 +193,11 @@ START_TEST(test_rename_file10)
     ck_assert_int_eq(st_new.st_gid, 500);
     ck_assert(S_ISREG(st_new.st_mode));
     
-    // Rename back for other tests that might need the original file
+    // Rename back
     rv = fs_ops.rename("/new_file.10", "/file.10");
     ck_assert_int_eq(rv, 0);
     
-    // Test rename with path traversal (../ components)
+    // Test rename with .. path traversal
     rv = fs_ops.rename("/dir2/../file.10", "/dir3/../file.10");
     ck_assert_int_eq(rv, 0);
     
@@ -193,10 +240,8 @@ int main(int argc, char **argv)
     Suite *s = suite_create("fs5600");
     TCase *tc = tcase_create("read_mostly");
 
-    tcase_add_test(tc, a_test); /* see START_TEST above */
-    tcase_add_test(tc, test_getattr_file_1k);
-    tcase_add_test(tc, test_getattr_file_1k_deeppath);
-    tcase_add_test(tc, test_readdir_root);
+    tcase_add_test(tc, test_getattr_all);
+    tcase_add_test(tc, test_readdir_all_dirs);
     tcase_add_test(tc, test_read_file_1k);
     tcase_add_test(tc, test_statfs_values);
     tcase_add_test(tc, test_chmod_file_1k);
