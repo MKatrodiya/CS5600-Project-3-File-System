@@ -29,16 +29,15 @@ struct fuse_context *fuse_get_context(void)
     return &ctx;
 }
 
-struct {
-    const char *name;
-    int seen;
-} dir_table[] = {
-    {"testfile", 0},
-    {NULL, 0}
-};
 
-int readdir_filler_rootdir(void *ptr, const char *name, const struct stat *stbuf, off_t off)
+int readdir_filler(void *ptr, const char *name, const struct stat *stbuf, off_t off)
 {
+    struct DirEntry {
+        const char *name;
+        int seen;
+    };
+    struct DirEntry *dir_table = ptr;
+
     for (int i = 0; dir_table[i].name != NULL; i++) {
         if (strcmp(name, dir_table[i].name) == 0) {
             dir_table[i].seen = 1;
@@ -50,25 +49,95 @@ int readdir_filler_rootdir(void *ptr, const char *name, const struct stat *stbuf
 
 START_TEST(test_create_file)
 {
-    // Create a test file
     int rv = fs_ops.create("/testfile", 0100666, NULL);
     ck_assert_int_eq(rv, 0);
     
-    // Verify file attributes
     struct stat st;
     rv = fs_ops.getattr("/testfile", &st);
     ck_assert_int_eq(rv, 0);
     ck_assert_int_eq(st.st_uid, 500);
     ck_assert_int_eq(st.st_gid, 500);
     ck_assert(S_ISREG(st.st_mode));
+    ck_assert_int_eq(st.st_mode & 0777, 0666);
     ck_assert_int_eq(st.st_size, 0);
+
+    struct {
+        const char *name;
+        int seen;
+    } dir_table[] = {
+        {"testfile", 0},
+        {NULL, 0}
+    };
     
-    rv = fs_ops.readdir("/", NULL, readdir_filler_rootdir, 0, NULL);
+    rv = fs_ops.readdir("/", dir_table, readdir_filler, 0, NULL);
     ck_assert_int_eq(rv, 0);
     ck_assert_int_eq(dir_table[0].seen, 1);
+
+    // testing nonexistent directory create
+    rv = fs_ops.create("/nonexistent/testfile", 0100666, NULL);
+    ck_assert_msg(rv == -ENOENT, "Create in nonexistent directory is failing");
+
+    // reate and recreate the file 
+    rv = fs_ops.create("/testfile2", 0100666, NULL);
+    ck_assert_int_eq(rv, 0);
+    rv = fs_ops.create("/testfile2", 0100666, NULL);
+    ck_assert_msg(rv == -EEXIST, "Recreating the same file is failing");
 }
 END_TEST
 
+START_TEST(test_mkdir_directory)
+{
+    int rv = fs_ops.mkdir("/testdir", 0777);
+    ck_assert_int_eq(rv, 0);
+    
+    struct stat st;
+    rv = fs_ops.getattr("/testdir", &st);
+    ck_assert_int_eq(rv, 0);
+    ck_assert_int_eq(st.st_uid, 500);
+    ck_assert_int_eq(st.st_gid, 500);
+    ck_assert(S_ISDIR(st.st_mode));
+    ck_assert_int_eq(st.st_mode & 0777, 0777);
+
+    struct {
+        char *name;
+        int seen;
+    } dir_table[] = {
+        {"testdir", 0},
+        {NULL, 0}
+    };
+
+    rv = fs_ops.readdir("/", dir_table, readdir_filler, 0, NULL);
+    ck_assert_int_eq(rv, 0);
+    ck_assert_int_eq(dir_table[0].seen, 1);
+
+
+    //subdirectory test
+    rv = fs_ops.mkdir("/parentdir", 0777);
+    ck_assert_int_eq(rv, 0);
+    rv = fs_ops.mkdir("/parentdir/subdir", 0777);
+    ck_assert_int_eq(rv, 0);
+    
+    struct stat st2;
+    rv = fs_ops.getattr("/parentdir/subdir", &st2);
+    ck_assert_int_eq(rv, 0);
+    ck_assert_int_eq(st2.st_uid, 500);
+    ck_assert_int_eq(st2.st_gid, 500);
+    ck_assert(S_ISDIR(st2.st_mode));
+    ck_assert_int_eq(st2.st_mode & 0777, 0777);
+    
+    struct {
+        char *name;
+        int seen;
+    } dir_table2[] = {
+        {"subdir", 0},
+        {NULL, 0}
+    };
+    
+    rv = fs_ops.readdir("/parentdir", dir_table2, readdir_filler, 0, NULL);
+    ck_assert_int_eq(rv, 0);
+    ck_assert_int_eq(dir_table2[0].seen, 1);
+}
+END_TEST
 
 /* note that your tests will call:
  *  fs_ops.getattr(path, struct stat *sb)
@@ -91,6 +160,7 @@ int main(int argc, char **argv)
     TCase *tc = tcase_create("write_mostly");
 
     tcase_add_test(tc, test_create_file); 
+    tcase_add_test(tc, test_mkdir_directory);
     
 
     suite_add_tcase(s, tc);

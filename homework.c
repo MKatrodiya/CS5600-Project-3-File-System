@@ -10,7 +10,8 @@
 
 #define MAX_PATH_LEN 10
 #define MAX_NAME_LEN 27
-#define S_IFMT  0170000 
+#define S_IFMT 0170000 
+#define S_IFDIR 0040000
 
 #include <stdlib.h>
 #include <stddef.h>
@@ -350,6 +351,7 @@ int fs_readdir(const char *path, void *ptr, fuse_fill_dir_t filler, off_t offset
         return -ENOTDIR;
     }
 
+    //TODO Allow read if read permissions
     for (int i = 0; i < inode.size / FS_BLOCK_SIZE; i++) 
     {
         char block[FS_BLOCK_SIZE];
@@ -478,6 +480,7 @@ int fs_create(const char *path, mode_t mode, struct fuse_file_info *fi)
     new_inode.mtime = new_inode.ctime;
     new_inode.size = 0;
 
+    // setting file inode
     char inode_block[FS_BLOCK_SIZE];
     memset(inode_block, 0, FS_BLOCK_SIZE);
     memcpy(inode_block, &new_inode, sizeof(new_inode));
@@ -488,6 +491,7 @@ int fs_create(const char *path, mode_t mode, struct fuse_file_info *fi)
         return -EIO;
     }
 
+    // add the new file to the parent directory
     for (int i = 0; i < parent_inode.size / FS_BLOCK_SIZE; i++) 
     {
         char block[FS_BLOCK_SIZE];
@@ -528,7 +532,121 @@ int fs_create(const char *path, mode_t mode, struct fuse_file_info *fi)
  */ 
 int fs_mkdir(const char *path, mode_t mode)
 {
-    /* your code here */
+    char *components[MAX_PATH_LEN];
+    int num_components = pathparse(path, components);
+    
+    char *resolved_components[MAX_PATH_LEN];
+    int resolved_count = resolve_path(components, num_components, resolved_components);
+
+    char *dirname = resolved_components[resolved_count - 1];
+
+    char parent_path[256] = "/";
+    for (int i = 0; i < resolved_count - 1; i++) {
+        strcat(parent_path, resolved_components[i]);
+    }
+
+    uint32_t parent_inum;
+    struct fs_inode parent_inode;
+    int res = translate(parent_path, &parent_inum, &parent_inode);
+    if (res != 0) 
+    {
+        return res;
+    }
+
+    if (!S_ISDIR(parent_inode.mode)) 
+    {
+        return -ENOTDIR;
+    }
+
+    for (int i = 0; i < parent_inode.size / FS_BLOCK_SIZE; i++) 
+    {
+        char block[FS_BLOCK_SIZE];
+        if (block_read(block, parent_inode.ptrs[i], 1) != 0) 
+        {
+            return -EIO;
+        }
+        struct fs_dirent *entries = (struct fs_dirent *)block;
+        for (int j = 0; j < FS_BLOCK_SIZE / sizeof(struct fs_dirent); j++) 
+        {
+            if (entries[j].valid && strcmp(entries[j].name, dirname) == 0)
+            {
+                return -EEXIST;
+            }
+        }
+    }
+
+    uint32_t dir_inum = 0, data_block = 0;
+    for (int i = 2; i < superblock.disk_size; i++) 
+    {
+        if (!dir_inum && !bit_test(bitmap, i)) 
+        {
+            dir_inum = i;
+        } else if (!data_block && !bit_test(bitmap, i)) 
+        {
+            data_block = i;
+            break;
+        }
+    }
+    if (!dir_inum || !data_block) 
+    {
+        return -ENOSPC;
+    }
+    bit_set(bitmap, dir_inum);
+    bit_set(bitmap, data_block);
+    if (block_write(bitmap, 1, 1) != 0) 
+    {
+        return -EIO;
+    }
+
+    struct fs_inode dir_inode;
+    memset(&dir_inode, 0, sizeof(struct fs_inode));
+
+    struct fuse_context *ctx = fuse_get_context();
+    dir_inode.uid = ctx->uid;
+    dir_inode.gid = ctx->gid;
+    dir_inode.mode = S_IFDIR | mode,
+    dir_inode.ctime = time(NULL);
+    dir_inode.mtime = dir_inode.ctime;
+    dir_inode.size = FS_BLOCK_SIZE;
+    dir_inode.ptrs[0] = data_block;  
+
+    char inode_block[FS_BLOCK_SIZE];
+    memset(inode_block, 0, FS_BLOCK_SIZE);
+    memcpy(inode_block, &dir_inode, sizeof(dir_inode));
+    if (block_write(inode_block, dir_inum, 1) != 0) 
+    {
+        bit_clear(bitmap, dir_inum);
+        bit_clear(bitmap, data_block);
+        block_write(bitmap, 1, 1);
+        return -EIO;
+    }
+
+    for (int i = 0; i < parent_inode.size / FS_BLOCK_SIZE; i++) 
+    {
+        char block[FS_BLOCK_SIZE];
+        if (block_read(block, parent_inode.ptrs[i], 1) != 0) 
+        {
+            return -EIO;
+        }
+        struct fs_dirent *entries = (struct fs_dirent *)block;
+        for (int j = 0; j < FS_BLOCK_SIZE / sizeof(struct fs_dirent); j++) 
+        {
+            if (!entries[j].valid) 
+            {
+                entries[j].valid = 1;
+                entries[j].inode = dir_inum;
+                strncpy(entries[j].name, dirname, MAX_NAME_LEN);
+                entries[j].name[MAX_NAME_LEN - 1] = '\0';
+                if (block_write(block, parent_inode.ptrs[i], 1) != 0) 
+                {
+                    return -EIO;
+                }
+                return 0;
+            }
+        }
+    }
+    free_components(components, num_components);
+    free_components(resolved_components, resolved_count);
     return -EOPNOTSUPP;
 }
 
@@ -759,6 +877,7 @@ int fs_read(const char *path, char *buf, size_t len, off_t offset, struct fuse_f
     {
         len = inode.size - offset;
     }
+    //TODO Allow read if read permissions
     size_t bytes_read = 0;
     while (bytes_read < len) 
     {
