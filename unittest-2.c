@@ -15,6 +15,11 @@
 #include <stdlib.h>
 #include <errno.h>
 
+#include "fs5600.h"
+
+extern struct fuse_operations fs_ops;
+extern void block_init(char *file);
+
 /* mockup for fuse_get_context. you can change ctx.uid, ctx.gid in 
  * tests if you want to test setting UIDs in mknod/mkdir
  */
@@ -24,24 +29,46 @@ struct fuse_context *fuse_get_context(void)
     return &ctx;
 }
 
-/* change test name and make it do something useful */
-START_TEST(a_test)
+struct {
+    const char *name;
+    int seen;
+} dir_table[] = {
+    {"testfile", 0},
+    {NULL, 0}
+};
+
+int readdir_filler_rootdir(void *ptr, const char *name, const struct stat *stbuf, off_t off)
 {
-    ck_assert_int_eq(1, 1);
+    for (int i = 0; dir_table[i].name != NULL; i++) {
+        if (strcmp(name, dir_table[i].name) == 0) {
+            dir_table[i].seen = 1;
+            return 0;
+        }
+    }
+    return 0;
+}
+
+START_TEST(test_create_file)
+{
+    // Create a test file
+    int rv = fs_ops.create("/testfile", 0100666, NULL);
+    ck_assert_int_eq(rv, 0);
+    
+    // Verify file attributes
+    struct stat st;
+    rv = fs_ops.getattr("/testfile", &st);
+    ck_assert_int_eq(rv, 0);
+    ck_assert_int_eq(st.st_uid, 500);
+    ck_assert_int_eq(st.st_gid, 500);
+    ck_assert(S_ISREG(st.st_mode));
+    ck_assert_int_eq(st.st_size, 0);
+    
+    rv = fs_ops.readdir("/", NULL, readdir_filler_rootdir, 0, NULL);
+    ck_assert_int_eq(rv, 0);
+    ck_assert_int_eq(dir_table[0].seen, 1);
 }
 END_TEST
 
-/* this is an example of a callback function for readdir
- */
-int empty_filler(void *ptr, const char *name, const struct stat *stbuf,
-                 off_t off)
-{
-    /* FUSE passes you the entry name and a pointer to a 'struct stat' 
-     * with the attributes. Ignore the 'ptr' and 'off' arguments 
-     * 
-     */
-    return 0;
-}
 
 /* note that your tests will call:
  *  fs_ops.getattr(path, struct stat *sb)
@@ -55,14 +82,16 @@ extern void block_init(char *file);
 
 int main(int argc, char **argv)
 {
+    system("python gen-disk.py -q disk2.in test2.img");
+
     block_init("test2.img");
     fs_ops.init(NULL);
     
     Suite *s = suite_create("fs5600");
     TCase *tc = tcase_create("write_mostly");
 
-    tcase_add_test(tc, a_test); /* see START_TEST above */
-    /* add more tests here */
+    tcase_add_test(tc, test_create_file); 
+    
 
     suite_add_tcase(s, tc);
     SRunner *sr = srunner_create(s);

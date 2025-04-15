@@ -289,6 +289,7 @@ int main(int argc, char **argv)
     Suite *s = suite_create("fs5600");
     TCase *tc = tcase_create("read_mostly");
 
+    //read tests - part 1 tests
     tcase_add_test(tc, test_getattr_all);
     tcase_add_test(tc, test_readdir_all_dirs);
     tcase_add_test(tc, test_read_file_1k_big);
@@ -297,6 +298,7 @@ int main(int argc, char **argv)
     tcase_add_test(tc, test_chmod_file_and_dir);
     tcase_add_test(tc, test_rename_file_and_directory);
 
+    
     suite_add_tcase(s, tc);
     SRunner *sr = srunner_create(s);
     srunner_set_fork_status(sr, CK_NOFORK);

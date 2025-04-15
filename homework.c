@@ -129,7 +129,6 @@ int read_inode(uint32_t inum, struct fs_inode *inode)
     return 0;
 }
 
-
 int pathparse(const char *path, char **components) 
 {
     char *token;
@@ -156,7 +155,6 @@ int translate(const char *path, uint32_t *inum, struct fs_inode *inode)
     char *components[MAX_PATH_LEN];
     int num_components = pathparse(path, components);
     uint32_t current_inum = 2;
-    
     
     uint32_t parent_stack[MAX_PATH_LEN]; // Stack to keep track of parent inodes
     int stack_pos = 0;
@@ -278,6 +276,17 @@ int resolve_path(char **components, int num_components, char **resolved)
     return resolved_index;
 }
 
+void free_components(char **components, int num_components)
+{
+    if (components) {
+        for (int i = 0; i < num_components; i++) {
+            if (components[i]) {
+                free(components[i]);
+                components[i] = NULL;
+            }
+        }
+    }
+}
 
 /* getattr - get file or directory attributes. For a description of
  *  the fields in 'struct stat', see 'man lstat'.
@@ -392,8 +401,120 @@ int fs_readdir(const char *path, void *ptr, fuse_fill_dir_t filler, off_t offset
  */
 int fs_create(const char *path, mode_t mode, struct fuse_file_info *fi)
 {
-    /* your code here */
-    return -EOPNOTSUPP;
+    char *components[MAX_PATH_LEN];
+    int num_components = pathparse(path, components);
+    
+    char *resolved_components[MAX_PATH_LEN];
+    int resolved_count = resolve_path(components, num_components, resolved_components);
+
+    char *filename = resolved_components[resolved_count - 1];
+
+    char parent_path[256] = "/";
+    for (int i = 0; i < resolved_count - 1; i++) {
+        strcat(parent_path, resolved_components[i]);
+    }
+
+    uint32_t parent_inum;
+    struct fs_inode parent_inode;
+    int res = translate(parent_path, &parent_inum, &parent_inode);
+    if (res != 0) 
+    {
+        return res;
+    }
+
+    if (!S_ISDIR(parent_inode.mode)) 
+    {
+        return -ENOTDIR;
+    }
+
+    for (int i = 0; i < parent_inode.size / FS_BLOCK_SIZE; i++) 
+    {
+        char block[FS_BLOCK_SIZE];
+        if (block_read(block, parent_inode.ptrs[i], 1) != 0) 
+        {
+            return -EIO;
+        }
+        struct fs_dirent *entries = (struct fs_dirent *)block;
+        for (int j = 0; j < FS_BLOCK_SIZE / sizeof(struct fs_dirent); j++) 
+        {
+            if (entries[j].valid && strcmp(entries[j].name, filename) == 0)
+            {
+                free_components(components, num_components);
+                free_components(resolved_components, resolved_count);
+                return -EEXIST;
+            }
+        }
+    }
+    
+    uint32_t inum = 0;
+    for (int i = 2; i < superblock.disk_size; i++) 
+    {
+        if (!bit_test(bitmap, i)) 
+        { 
+            inum = i; 
+            break; 
+        }
+    }
+    if (!inum) 
+    {
+        free_components(components, num_components);
+        free_components(resolved_components, resolved_count);
+        return -ENOSPC;
+    }
+    bit_set(bitmap, inum);
+    if (block_write(bitmap, 1, 1) != 0) 
+    {
+        return -EIO;
+    }
+
+    struct fs_inode new_inode;
+    memset(&new_inode, 0, sizeof(struct fs_inode));
+
+    struct fuse_context *ctx = fuse_get_context();
+    new_inode.uid = ctx->uid;
+    new_inode.gid = ctx->gid;
+    new_inode.mode = mode;
+    new_inode.ctime = time(NULL);
+    new_inode.mtime = new_inode.ctime;
+    new_inode.size = 0;
+
+    char inode_block[FS_BLOCK_SIZE];
+    memset(inode_block, 0, FS_BLOCK_SIZE);
+    memcpy(inode_block, &new_inode, sizeof(new_inode));
+    if (block_write(inode_block, inum, 1) != 0) 
+    {
+        bit_clear(bitmap, inum);
+        block_write(bitmap, 1, 1);
+        return -EIO;
+    }
+
+    for (int i = 0; i < parent_inode.size / FS_BLOCK_SIZE; i++) 
+    {
+        char block[FS_BLOCK_SIZE];
+        if (block_read(block, parent_inode.ptrs[i], 1) != 0) 
+        {
+            return -EIO;
+        }
+        struct fs_dirent *entries = (struct fs_dirent *)block;
+        for (int j = 0; j < FS_BLOCK_SIZE / sizeof(struct fs_dirent); j++) 
+        {
+            if (!entries[j].valid) 
+            {
+                entries[j].valid = 1;
+                entries[j].inode = inum;
+                strncpy(entries[j].name, filename, MAX_NAME_LEN);
+                entries[j].name[MAX_NAME_LEN - 1] = '\0';
+                if (block_write(block, parent_inode.ptrs[i], 1) != 0) 
+                {
+                    return -EIO;
+                }
+                return 0;
+            }
+        }
+    }
+    free_components(components, num_components);
+    free_components(resolved_components, resolved_count);
+    return -ENOSPC;
 }
 
 /* mkdir - create a directory with the given mode.
