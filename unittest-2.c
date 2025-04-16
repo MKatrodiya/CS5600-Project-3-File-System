@@ -139,6 +139,43 @@ START_TEST(test_mkdir_directory)
 }
 END_TEST
 
+
+START_TEST(test_unlink)
+{
+    int rv = fs_ops.create("/unlinkfile.txt", 0100666, NULL);
+    ck_assert_int_eq(rv, 0);
+    
+    struct {
+        char *name;
+        int seen;
+    } dir_table[] = {
+        {"unlinkfile.txt", 0},
+        {NULL, 0}
+    };
+    
+    rv = fs_ops.readdir("/", dir_table, readdir_filler, 0, NULL);
+    ck_assert_int_eq(rv, 0);
+    ck_assert_int_eq(dir_table[0].seen, 1);
+
+    // Unlink the file
+    rv = fs_ops.unlink("/unlinkfile.txt");
+    ck_assert_int_eq(rv, 0);
+    
+    // Check that file is removed from the directory
+    struct {
+        char *name;
+        int seen;
+    } dir_table2[] = {
+        {"unlinkfile.txt", 0},
+        {NULL, 0}
+    };
+    
+    rv = fs_ops.readdir("/", dir_table2, readdir_filler, 0, NULL);
+    ck_assert_int_eq(rv, 0);
+    ck_assert_int_eq(dir_table2[0].seen, 0);
+}
+END_TEST
+
 /* note that your tests will call:
  *  fs_ops.getattr(path, struct stat *sb)
  *  fs_ops.readdir(path, NULL, filler_function, 0, NULL)
@@ -161,6 +198,7 @@ int main(int argc, char **argv)
 
     tcase_add_test(tc, test_create_file); 
     tcase_add_test(tc, test_mkdir_directory);
+    tcase_add_test(tc, test_unlink);
     
 
     suite_add_tcase(s, tc);

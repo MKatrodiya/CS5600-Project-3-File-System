@@ -22,6 +22,7 @@
 #include <stdio.h>
 #include <errno.h>
 #include <sys/stat.h>
+#include <math.h>
 
 #include "fs5600.h"
 
@@ -655,10 +656,89 @@ int fs_mkdir(const char *path, mode_t mode)
  *  success - return 0
  *  errors - path resolution, ENOENT, EISDIR
  */
+//TODO check for all the entries to be emply to empty the block
 int fs_unlink(const char *path)
 {
-    /* your code here */
-    return -EOPNOTSUPP;
+    uint32_t inum;
+    struct fs_inode inode;
+    int inoderes = translate(path, &inum, &inode);
+    if (inoderes != 0) 
+    {
+        return inoderes;
+    }
+    if (S_ISDIR(inode.mode)) 
+    {
+        return -EISDIR;
+    }
+
+    char *components[MAX_PATH_LEN];
+    int num_components = pathparse(path, components);
+    
+    char *resolved_components[MAX_PATH_LEN];
+    int resolved_count = resolve_path(components, num_components, resolved_components);
+
+    char *filename = resolved_components[resolved_count - 1];
+
+    char parent_path[256] = "/";
+    for (int i = 0; i < resolved_count - 1; i++) {
+        strcat(parent_path, resolved_components[i]);
+    }
+
+    uint32_t parent_inum;
+    struct fs_inode parent_inode;
+    int res = translate(parent_path, &parent_inum, &parent_inode);
+    if (res != 0) 
+    {
+        return res;
+    }
+
+    if (!S_ISDIR(parent_inode.mode)) 
+    {
+        return -ENOTDIR;
+    }
+
+    int found = 0;
+    for (int i = 0; i < parent_inode.size / FS_BLOCK_SIZE; i++) 
+    {
+        char block[FS_BLOCK_SIZE];
+        if (block_read(block, parent_inode.ptrs[i], 1) != 0) 
+        {
+            return -EIO;
+        }
+        struct fs_dirent *entries = (struct fs_dirent *)block;
+        for (int j = 0; j < FS_BLOCK_SIZE / sizeof(struct fs_dirent); j++) 
+        {
+            if (entries[j].valid && strcmp(entries[j].name, filename) == 0)
+            {
+                entries[j].valid = 0;
+                if (block_write(block, parent_inode.ptrs[i], 1) != 0) 
+                {
+                    return -EIO;
+                }
+                found = 1;
+                break;
+            }
+        }
+        if (found) 
+        {
+            break;
+        }
+    }
+
+    int num_blocks = ceil((double)inode.size / FS_BLOCK_SIZE);
+    for (int i = 0; i < num_blocks; i++) 
+    {
+        if (inode.ptrs[i]) 
+        {
+            bit_clear(bitmap, inode.ptrs[i]);
+        }
+    }
+    bit_clear(bitmap, inum);
+    if (block_write(bitmap, 1, 1) != 0) 
+    {
+        return -EIO;
+    }
+    return 0;
 }
 
 /* rmdir - remove a directory
