@@ -157,11 +157,10 @@ START_TEST(test_unlink)
     ck_assert_int_eq(rv, 0);
     ck_assert_int_eq(dir_table[0].seen, 1);
 
-    // Unlink the file
+    // unlink the file
     rv = fs_ops.unlink("/unlinkfile.txt");
     ck_assert_int_eq(rv, 0);
     
-    // Check that file is removed from the directory
     struct {
         char *name;
         int seen;
@@ -173,6 +172,24 @@ START_TEST(test_unlink)
     rv = fs_ops.readdir("/", dir_table2, readdir_filler, 0, NULL);
     ck_assert_int_eq(rv, 0);
     ck_assert_int_eq(dir_table2[0].seen, 0);
+}
+END_TEST
+
+START_TEST(test_rmdir)
+{
+    int rv = fs_ops.mkdir("/rmdirtest", 0777);
+    ck_assert_int_eq(rv, 0);
+    
+    struct stat st;
+    rv = fs_ops.getattr("/rmdirtest", &st);
+    ck_assert_int_eq(rv, 0);
+    ck_assert(S_ISDIR(st.st_mode));
+    
+    rv = fs_ops.rmdir("/rmdirtest");
+    ck_assert_int_eq(rv, 0);
+    
+    rv = fs_ops.getattr("/rmdirtest", &st);
+    ck_assert_int_eq(rv, -ENOENT);
 }
 END_TEST
 
@@ -199,6 +216,7 @@ int main(int argc, char **argv)
     tcase_add_test(tc, test_create_file); 
     tcase_add_test(tc, test_mkdir_directory);
     tcase_add_test(tc, test_unlink);
+    tcase_add_test(tc, test_rmdir);
     
 
     suite_add_tcase(s, tc);

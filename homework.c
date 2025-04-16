@@ -680,7 +680,8 @@ int fs_unlink(const char *path)
     char *filename = resolved_components[resolved_count - 1];
 
     char parent_path[256] = "/";
-    for (int i = 0; i < resolved_count - 1; i++) {
+    for (int i = 0; i < resolved_count - 1; i++) 
+    {
         strcat(parent_path, resolved_components[i]);
     }
 
@@ -738,6 +739,9 @@ int fs_unlink(const char *path)
     {
         return -EIO;
     }
+
+    free_components(components, num_components);
+    free_components(resolved_components, resolved_count);
     return 0;
 }
 
@@ -747,8 +751,103 @@ int fs_unlink(const char *path)
  */
 int fs_rmdir(const char *path)
 {
-    /* your code here */
-    return -EOPNOTSUPP;
+    uint32_t inum;
+    struct fs_inode inode;
+    int inode_res = translate(path, &inum, &inode);
+    if (inode_res != 0) 
+    {
+        return inode_res;
+    }
+    if (!S_ISDIR(inode.mode)) 
+    {
+        return -ENOTDIR;
+    }
+
+    char block[FS_BLOCK_SIZE];
+    if (block_read(block, inode.ptrs[0], 1) != 0) // directory will have only one block
+    {
+        return -EIO;
+    }
+    struct fs_dirent *entries = (struct fs_dirent *)block;
+    for (int i = 0; i < FS_BLOCK_SIZE / sizeof(struct fs_dirent); i++) 
+    {
+        if (entries[i].valid) 
+        {
+            return -ENOTEMPTY;
+        }
+    }
+
+    char *components[MAX_PATH_LEN];
+    int num_components = pathparse(path, components);
+    
+    char *resolved_components[MAX_PATH_LEN];
+    int resolved_count = resolve_path(components, num_components, resolved_components);
+
+    char *filename = resolved_components[resolved_count - 1];
+
+    char parent_path[256] = "/";
+    for (int i = 0; i < resolved_count - 1; i++) 
+    {
+        strcat(parent_path, resolved_components[i]);
+    }
+
+    uint32_t parent_inum;
+    struct fs_inode parent_inode;
+    int res = translate(parent_path, &parent_inum, &parent_inode);
+    if (res != 0) 
+    {
+        return res;
+    }
+
+    if (!S_ISDIR(parent_inode.mode)) 
+    {
+        return -ENOTDIR;
+    }
+
+    int found = 0;
+    for (int i = 0; i < parent_inode.size / FS_BLOCK_SIZE; i++) 
+    {
+        char block[FS_BLOCK_SIZE];
+        if (block_read(block, parent_inode.ptrs[i], 1) != 0) 
+        {
+            return -EIO;
+        }
+        struct fs_dirent *entries = (struct fs_dirent *)block;
+        for (int j = 0; j < FS_BLOCK_SIZE / sizeof(struct fs_dirent); j++) 
+        {
+            if (entries[j].valid && strcmp(entries[j].name, filename) == 0)
+            {
+                entries[j].valid = 0;
+                if (block_write(block, parent_inode.ptrs[i], 1) != 0) 
+                {
+                    return -EIO;
+                }
+                found = 1;
+                break;
+            }
+        }
+        if (found) 
+        {
+            break;
+        }
+    }
+
+    int num_blocks = ceil((double)inode.size / FS_BLOCK_SIZE);
+    for (int i = 0; i < num_blocks; i++) 
+    {
+        if (inode.ptrs[i]) 
+        {
+            bit_clear(bitmap, inode.ptrs[i]);
+        }
+    }
+    bit_clear(bitmap, inum);
+    if (block_write(bitmap, 1, 1) != 0) 
+    {
+        return -EIO;
+    }
+    free_components(components, num_components);
+    free_components(resolved_components, resolved_count);
+    return 0;
 }
 
 /* rename - rename a file or directory
@@ -863,7 +962,11 @@ int fs_rename(const char *src_path, const char *dst_path)
                 perror("In fs_rename: block write failed");
                 return -EIO;
             }
-
+            
+            free_components(src_components, src_count);
+            free_components(dst_components, dst_count);
+            free_components(resolved_srcpath, resolved_count_src); 
+            free_components(resolved_dstpath, resolved_count_dst);
             return 0;
         }
     }
