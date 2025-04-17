@@ -289,6 +289,18 @@ void free_components(char **components, int num_components)
     }
 }
 
+// populate stat struct from inode
+void setstat(fs_inode inode, struct stat *sb) {	
+    sb->st_uid = inode.uid;
+    sb->st_gid = inode.gid;
+    sb->st_mode = inode.mode;
+    sb->st_size = inode.size;
+    sb->st_nlink = 1;
+    sb->st_atime = inode.mtime;
+    sb->st_mtime = inode.mtime;
+    sb->st_ctime = inode.ctime;
+}
+
 /* getattr - get file or directory attributes. For a description of
  *  the fields in 'struct stat', see 'man lstat'.
  *
@@ -311,14 +323,8 @@ int fs_getattr(const char *path, struct stat *sb)
     {
         return res;
     }
-    sb->st_uid = inode.uid;
-    sb->st_gid = inode.gid;
-    sb->st_mode = inode.mode;
-    sb->st_size = inode.size;
-    sb->st_nlink = 1;
-    sb->st_atime = inode.mtime;
-    sb->st_mtime = inode.mtime;
-    sb->st_ctime = inode.ctime;
+
+	setstat(inode, sb);
 
     return 0;
 }
@@ -373,12 +379,8 @@ int fs_readdir(const char *path, void *ptr, fuse_fill_dir_t filler, off_t offset
                     continue;
                 }
                 
-                st.st_mode = entry_inode.mode;
-                st.st_nlink = 1;
-                st.st_uid = entry_inode.uid;
-                st.st_gid = entry_inode.gid;
-                st.st_size = entry_inode.size;
-                
+		setstat(entry_inode, &st);
+
                 filler(ptr, entries[j].name, &st, 0);
             }
             
