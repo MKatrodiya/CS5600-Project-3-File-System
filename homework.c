@@ -290,7 +290,7 @@ void free_components(char **components, int num_components)
 }
 
 // populate stat struct from inode
-void setstat(fs_inode inode, struct stat *sb) {	
+void setstat(struct fs_inode inode, struct stat *sb) {	
 	sb->st_uid = inode.uid;
 	sb->st_gid = inode.gid;
 	sb->st_mode = inode.mode;
