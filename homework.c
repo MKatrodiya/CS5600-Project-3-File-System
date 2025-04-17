@@ -46,6 +46,9 @@ Global variables and structures used by the filesystem.
 static struct fs_super superblock;      // global superblock
 static unsigned char *bitmap;   // global block bitmap
 
+#define MIN(a, b) ((a) < (b) ? (a) : (b))
+#define MAX(a, b) ((a) > (b) ? (a) : (b))
+
 /* bitmap functions
  */
 void bit_set(unsigned char *map, int i)
@@ -651,7 +654,6 @@ int fs_mkdir(const char *path, mode_t mode)
     return -EOPNOTSUPP;
 }
 
-
 /* unlink - delete a file
  *  success - return 0
  *  errors - path resolution, ENOENT, EISDIR
@@ -832,14 +834,7 @@ int fs_rmdir(const char *path)
         }
     }
 
-    int num_blocks = ceil((double)inode.size / FS_BLOCK_SIZE);
-    for (int i = 0; i < num_blocks; i++) 
-    {
-        if (inode.ptrs[i]) 
-        {
-            bit_clear(bitmap, inode.ptrs[i]);
-        }
-    }
+    bit_clear(bitmap, inode.ptrs[0]);
     bit_clear(bitmap, inum);
     if (block_write(bitmap, 1, 1) != 0) 
     {
@@ -1029,7 +1024,6 @@ int fs_truncate(const char *path, off_t len)
     return -EOPNOTSUPP;
 }
 
-
 /* read - read data from an open file.
  * success: should return exactly the number of bytes requested, except:
  *   - if offset >= file len, return 0
@@ -1037,7 +1031,6 @@ int fs_truncate(const char *path, off_t len)
  *   - on error, return <0
  * Errors - path resolution, ENOENT, EISDIR
  */
-
  //TODO: change error return values to match the assignment
 int fs_read(const char *path, char *buf, size_t len, off_t offset, struct fuse_file_info *fi)
 {
@@ -1064,8 +1057,8 @@ int fs_read(const char *path, char *buf, size_t len, off_t offset, struct fuse_f
     size_t bytes_read = 0;
     while (bytes_read < len) 
     {
-        uint32_t block_index = (offset + bytes_read) / FS_BLOCK_SIZE;
-        uint32_t block_offset = (offset + bytes_read) % FS_BLOCK_SIZE;
+        int block_index = (offset + bytes_read) / FS_BLOCK_SIZE;
+        int block_offset = (offset + bytes_read) % FS_BLOCK_SIZE;
         uint32_t block = inode.ptrs[block_index];
         char block_data[FS_BLOCK_SIZE];
         if (block_read(block_data, block, 1) != 0) 
@@ -1093,11 +1086,97 @@ int fs_read(const char *path, char *buf, size_t len, off_t offset, struct fuse_f
  *  (POSIX semantics support the creation of files with "holes" in them, 
  *   but we don't)
  */
-int fs_write(const char *path, const char *buf, size_t len,
-	     off_t offset, struct fuse_file_info *fi)
+
+ //TODO check for write permissions before write
+int fs_write(const char *path, const char *buf, size_t len, off_t offset, struct fuse_file_info *fi)
 {
-    /* your code here */
-    return -EOPNOTSUPP;
+    
+    uint32_t inum;
+    struct fs_inode inode;
+    int inode_res = translate(path, &inum, &inode);
+    if (inode_res != 0) 
+    {
+        return inode_res;
+    }
+    if (S_ISDIR(inode.mode)) 
+    {
+        return -EISDIR;
+    }
+    if (offset > inode.size) 
+    {
+        return -EINVAL;
+    }
+
+    size_t new_size = offset + len;
+    uint32_t new_blocks = (uint32_t)ceil((double)new_size / FS_BLOCK_SIZE);
+    uint32_t current_blocks = (uint32_t)ceil((double)inode.size / FS_BLOCK_SIZE);
+    uint32_t new_blocks_needed = new_blocks - current_blocks;
+    if (new_blocks_needed < 0) 
+    {
+        new_blocks_needed = 0;
+    }
+
+    if (new_blocks_needed > 0) {
+        for (int i = 0; i < new_blocks_needed; i++) 
+        {
+            uint32_t new_block = 0;
+            for (uint32_t j = 2; j < superblock.disk_size; j++) 
+            {
+                if (!bit_test(bitmap, j)) 
+                {
+                    new_block = j;
+                    break;
+                }
+            }
+            
+            if (new_block == 0) {
+                return -ENOSPC;
+            }
+            
+            bit_set(bitmap, new_block);
+            inode.ptrs[current_blocks + i] = new_block;
+        }
+    }
+
+    size_t bytes_written = 0;
+    while (bytes_written < len) 
+    {
+        int block_index = (offset + bytes_written) / FS_BLOCK_SIZE;
+        int block_offset = (offset + bytes_written) % FS_BLOCK_SIZE;
+        uint32_t block = inode.ptrs[block_index];
+        char block_data[FS_BLOCK_SIZE];
+        uint32_t block_len = MIN(len - bytes_written, FS_BLOCK_SIZE - block_offset); // minimum of remaining bytes to write and space remaining in current block
+
+        if (block_offset > 0 || block_len < FS_BLOCK_SIZE) 
+        {
+            if (block_read(block_data, block, 1) != 0) 
+            {
+                return -EIO;
+            }
+        }
+        
+        memcpy(block_data + block_offset, buf + bytes_written, block_len);
+        if (block_write(block_data, inode.ptrs[block_index], 1) != 0) 
+        {
+            return -EIO;
+        }
+
+        bytes_written += block_len;
+    }
+
+    inode.size = MAX(inode.size, new_size);
+    inode.mtime = time(NULL);
+    char inode_block[FS_BLOCK_SIZE];
+    memcpy(inode_block, &inode, sizeof(inode));
+    if (block_write(inode_block, inum, 1) != 0) 
+    {
+        return -EIO;
+    }
+
+    if (new_blocks > current_blocks) {
+        if (block_write(bitmap, 1, 1) != 0) return -EIO;
+    }
+    return len;
 }
 
 /* statfs - get file system statistics

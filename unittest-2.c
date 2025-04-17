@@ -321,13 +321,103 @@ START_TEST(test_rmdir)
 }
 END_TEST
 
+START_TEST(test_write)
+{
+    // Simple write data to the file
+    int rv = fs_ops.create("/writefile.txt", 0100666, NULL);
+    ck_assert_int_eq(rv, 0);
+    
+    const char *test_data = "Hii, My Name is Mitul Nakrnai, I am a passionate and experienced developer.";
+    int data_len = strlen(test_data);
+    rv = fs_ops.write("/writefile.txt", test_data, data_len, 0, NULL);
+    ck_assert_int_eq(rv, data_len);
+
+    struct stat st;
+    rv = fs_ops.getattr("/writefile.txt", &st);
+    ck_assert_int_eq(rv, 0);
+    ck_assert_int_eq(st.st_size, data_len);
+
+    char read_buf[100];
+    rv = fs_ops.read("/writefile.txt", read_buf, data_len, 0, NULL);
+    ck_assert_int_eq(rv, data_len);
+    read_buf[data_len] = '\0';
+    
+    ck_assert_str_eq(read_buf, test_data);
+
+
+
+    // write data to a file with an offset
+    int rv2 = fs_ops.create("/writeoffset.txt", 0100666, NULL);
+    ck_assert_int_eq(rv2, 0);
+    
+    const char *initial_data = "Hi I am Mitul Nakrani, You can call me Lord Mitul.";
+    int initial_len = strlen(initial_data);
+    rv2 = fs_ops.write("/writeoffset.txt", initial_data, initial_len, 0, NULL);
+    ck_assert_int_eq(rv2, initial_len);
+    
+    // Write more data at an offset
+    const char *append_data = " - You can also call me Legend Mitul.";
+    int append_len = strlen(append_data);
+    rv2 = fs_ops.write("/writeoffset.txt", append_data, append_len, initial_len, NULL);
+    ck_assert_int_eq(rv2, append_len);
+    
+    struct stat st2;
+    rv2 = fs_ops.getattr("/writeoffset.txt", &st2);
+    ck_assert_int_eq(rv2, 0);
+    ck_assert_int_eq(st2.st_size, initial_len + append_len);
+    
+    char read_buf2[200];
+    rv2 = fs_ops.read("/writeoffset.txt", read_buf2, initial_len + append_len, 0, NULL);
+    ck_assert_int_eq(rv2, initial_len + append_len);
+    read_buf2[initial_len + append_len] = '\0';
+    
+    char expected[200];
+    strcpy(expected, initial_data);
+    strcat(expected, append_data);
+    ck_assert_str_eq(read_buf2, expected);
+
+
+
+
+
+    // Create a test file
+    int rv3 = fs_ops.create("/overwritefile.txt", 0100666, NULL);
+    ck_assert_int_eq(rv3, 0);
+    
+    const char *initial_data_to_overwrite = "Hi I am Mitul Nakrani, You can call me Lord Mitul.";
+    int initial_len_data = strlen(initial_data_to_overwrite);
+    rv3 = fs_ops.write("/overwritefile.txt", initial_data_to_overwrite, initial_len_data, 0, NULL);
+    ck_assert_int_eq(rv3, initial_len_data);
+    
+    const char *overwrite_data = "You can also call me Legend Mitul.";
+    int overwrite_len = strlen(overwrite_data);
+    rv3 = fs_ops.write("/overwritefile.txt", overwrite_data, overwrite_len, 0, NULL);
+    ck_assert_int_eq(rv3, overwrite_len);
+    
+    char read_buf3[200];
+    rv3 = fs_ops.read("/overwritefile.txt", read_buf3, initial_len_data, 0, NULL);
+    ck_assert_int_eq(rv3, initial_len_data);
+    read_buf[initial_len_data] = '\0';
+    
+    char expected2[200];
+    if (overwrite_len < initial_len_data) {
+        strncpy(expected2, overwrite_data, overwrite_len);
+        strncpy(expected2 + overwrite_len, initial_data_to_overwrite + overwrite_len, initial_len_data - overwrite_len);
+        expected[initial_len_data] = '\0';
+    } else {
+        strcpy(expected2, overwrite_data);
+    }
+    ck_assert_str_eq(read_buf3, expected2);
+
+}
+END_TEST
+
 /* note that your tests will call:
  *  fs_ops.getattr(path, struct stat *sb)
  *  fs_ops.readdir(path, NULL, filler_function, 0, NULL)
  *  fs_ops.read(path, buf, len, offset, NULL);
  *  fs_ops.statfs(path, struct statvfs *sv);
  */
-
 extern struct fuse_operations fs_ops;
 extern void block_init(char *file);
 
@@ -345,6 +435,7 @@ int main(int argc, char **argv)
     tcase_add_test(tc, test_mkdir_directory);
     tcase_add_test(tc, test_unlink);
     tcase_add_test(tc, test_rmdir);
+    tcase_add_test(tc, test_write);
     
 
     suite_add_tcase(s, tc);
