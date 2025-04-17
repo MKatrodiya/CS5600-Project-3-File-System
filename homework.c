@@ -1018,10 +1018,44 @@ int fs_truncate(const char *path, off_t len)
      * and an error otherwise.
      */
     if (len != 0)
-	return -EINVAL;		/* invalid argument */
+    {
+        return -EINVAL;		/* invalid argument */
+    }
+	uint32_t inum;
+    struct fs_inode inode;
+    int res = translate(path, &inum, &inode);
+    if (res != 0) 
+    {
+        return res;
+    }
+    if (S_ISDIR(inode.mode)) 
+    {
+        return -EISDIR;
+    }
 
-    /* your code here */
-    return -EOPNOTSUPP;
+    int num_blocks = (int)ceil((double)inode.size / FS_BLOCK_SIZE);
+    for (int i = 0; i < num_blocks; i++) 
+    {
+        if (inode.ptrs[i]) 
+        {
+            bit_clear(bitmap, inode.ptrs[i]);
+        }
+    }
+    memset(inode.ptrs, 0, sizeof(inode.ptrs));
+    inode.size = 0;
+
+    char inode_block[FS_BLOCK_SIZE];
+    memcpy(inode_block, &inode, sizeof(inode));
+    if (block_write(inode_block, inum, 1) != 0) 
+    {
+        return -EIO;
+    }
+    if (block_write(bitmap, 1, 1) != 0) 
+    {
+        return -EIO;
+    }
+
+    return 0;
 }
 
 /* read - read data from an open file.
