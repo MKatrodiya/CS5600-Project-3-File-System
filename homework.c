@@ -1033,24 +1033,24 @@ int fs_truncate(const char *path, off_t len)
         return -EISDIR;
     }
 
-    int num_blocks = (int)ceil((double)inode.size / FS_BLOCK_SIZE);
-    for (int i = 0; i < num_blocks; i++) 
+    int num_blocks = (int)ceil((double)inode.size / FS_BLOCK_SIZE); // find number of blocks used by the file
+    for (int i = 0; i < num_blocks; i++) // clear the blocks used by the file
     {
         if (inode.ptrs[i]) 
         {
             bit_clear(bitmap, inode.ptrs[i]);
         }
     }
-    memset(inode.ptrs, 0, sizeof(inode.ptrs));
+    memset(inode.ptrs, 0, sizeof(inode.ptrs)); // clear the pointers to the blocks
     inode.size = 0;
 
     char inode_block[FS_BLOCK_SIZE];
     memcpy(inode_block, &inode, sizeof(inode));
-    if (block_write(inode_block, inum, 1) != 0) 
+    if (block_write(inode_block, inum, 1) != 0) // write the inode back
     {
         return -EIO;
     }
-    if (block_write(bitmap, 1, 1) != 0) 
+    if (block_write(bitmap, 1, 1) != 0)  // write the bitmap back
     {
         return -EIO;
     }
@@ -1142,19 +1142,20 @@ int fs_write(const char *path, const char *buf, size_t len, off_t offset, struct
     }
 
     size_t new_size = offset + len;
-    uint32_t new_blocks = (uint32_t)ceil((double)new_size / FS_BLOCK_SIZE);
-    uint32_t current_blocks = (uint32_t)ceil((double)inode.size / FS_BLOCK_SIZE);
+    uint32_t new_blocks = (uint32_t)ceil((double)new_size / FS_BLOCK_SIZE); // how many blocks are needed for the new size
+    uint32_t current_blocks = (uint32_t)ceil((double)inode.size / FS_BLOCK_SIZE); // how many blocks are currently used by the file
     uint32_t new_blocks_needed = new_blocks - current_blocks;
     if (new_blocks_needed < 0) 
     {
         new_blocks_needed = 0;
     }
 
-    if (new_blocks_needed > 0) {
+    if (new_blocks_needed > 0) // if new allocation needed
+    {
         for (int i = 0; i < new_blocks_needed; i++) 
         {
             uint32_t new_block = 0;
-            for (uint32_t j = 2; j < superblock.disk_size; j++) 
+            for (uint32_t j = 2; j < superblock.disk_size; j++)  // start from 2 to skip superblock and bitmap
             {
                 if (!bit_test(bitmap, j)) 
                 {
@@ -1168,7 +1169,7 @@ int fs_write(const char *path, const char *buf, size_t len, off_t offset, struct
             }
             
             bit_set(bitmap, new_block);
-            inode.ptrs[current_blocks + i] = new_block;
+            inode.ptrs[current_blocks + i] = new_block; // assign new block to inode
         }
     }
 
@@ -1189,7 +1190,7 @@ int fs_write(const char *path, const char *buf, size_t len, off_t offset, struct
             }
         }
         
-        memcpy(block_data + block_offset, buf + bytes_written, block_len);
+        memcpy(block_data + block_offset, buf + bytes_written, block_len); // copy data to the block
         if (block_write(block_data, inode.ptrs[block_index], 1) != 0) 
         {
             return -EIO;
