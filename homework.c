@@ -40,8 +40,8 @@ extern int block_read(void *buf, int lba, int nblks);
 extern int block_write(void *buf, int lba, int nblks);
 
 /*
-Global variables and structures used by the filesystem.
-*/
+   Global variables and structures used by the filesystem.
+ */
 static struct fs_super superblock;      // global superblock
 static unsigned char *bitmap;   // global block bitmap
 
@@ -49,15 +49,15 @@ static unsigned char *bitmap;   // global block bitmap
  */
 void bit_set(unsigned char *map, int i)
 {
-    map[i/8] |= (1 << (i%8));
+	map[i/8] |= (1 << (i%8));
 }
 void bit_clear(unsigned char *map, int i)
 {
-    map[i/8] &= ~(1 << (i%8));
+	map[i/8] &= ~(1 << (i%8));
 }
 int bit_test(unsigned char *map, int i)
 {
-    return map[i/8] & (1 << (i%8));
+	return map[i/8] & (1 << (i%8));
 }
 
 /* init - this is called once by the FUSE framework at startup. Ignore
@@ -68,33 +68,33 @@ int bit_test(unsigned char *map, int i)
  */
 void* fs_init(struct fuse_conn_info *conn)
 {
-    char buffer[FS_BLOCK_SIZE];
-    if (block_read(buffer, 0, 1) != 0) 
-    {
-        perror("In fs_init: superblock read failed");
-        return NULL;
-    }
-    memcpy(&superblock, buffer, sizeof(struct fs_super));
+	char buffer[FS_BLOCK_SIZE];
+	if (block_read(buffer, 0, 1) != 0) 
+	{
+		perror("In fs_init: superblock read failed");
+		return NULL;
+	}
+	memcpy(&superblock, buffer, sizeof(struct fs_super));
 
-    if (superblock.magic != FS_MAGIC) {
-        perror("In fs_init: invalid magic number");
-        return NULL;
-    }
+	if (superblock.magic != FS_MAGIC) {
+		perror("In fs_init: invalid magic number");
+		return NULL;
+	}
 
-    bitmap = malloc(FS_BLOCK_SIZE); // Allocate memory for block bitmap
-    if (!bitmap) {
-        perror("In fs_init: bitmap malloc failed");
-        return NULL;
-    }
+	bitmap = malloc(FS_BLOCK_SIZE); // Allocate memory for block bitmap
+	if (!bitmap) {
+		perror("In fs_init: bitmap malloc failed");
+		return NULL;
+	}
 
-    if (block_read(bitmap, 1, 1) != 0) {
-        perror("In fs_init: bitmap read failed");
-        free(bitmap);
-        bitmap = NULL;
-        return NULL;
-    }
+	if (block_read(bitmap, 1, 1) != 0) {
+		perror("In fs_init: bitmap read failed");
+		free(bitmap);
+		bitmap = NULL;
+		return NULL;
+	}
 
-    return NULL;
+	return NULL;
 }
 
 /* Note on path translation errors:
@@ -121,184 +121,184 @@ void* fs_init(struct fuse_conn_info *conn)
 
 int read_inode(uint32_t inum, struct fs_inode *inode) 
 {
-    char buffer[FS_BLOCK_SIZE];
-    if (block_read(buffer, inum, 1) != 0) 
-    {
-        return -1;
-    }  
-    memcpy(inode, buffer, sizeof(struct fs_inode));
-    return 0;
+	char buffer[FS_BLOCK_SIZE];
+	if (block_read(buffer, inum, 1) != 0) 
+	{
+		return -1;
+	}  
+	memcpy(inode, buffer, sizeof(struct fs_inode));
+	return 0;
 }
 
 int pathparse(const char *path, char **components) 
 {
-    char *token;
-    int i = 0;
-    char *path_copy = strdup(path);
-    if (!path_copy) 
-    {
-        return -1;
-    }
+	char *token;
+	int i = 0;
+	char *path_copy = strdup(path);
+	if (!path_copy) 
+	{
+		return -1;
+	}
 
-    token = strtok(path_copy, "/");
-    while (token != NULL && i < MAX_PATH_LEN) 
-    {
-        components[i] = strdup(token);
-        i++;
-        token = strtok(NULL, "/");
-    }
-    free(path_copy);
-    return i;
+	token = strtok(path_copy, "/");
+	while (token != NULL && i < MAX_PATH_LEN) 
+	{
+		components[i] = strdup(token);
+		i++;
+		token = strtok(NULL, "/");
+	}
+	free(path_copy);
+	return i;
 }
 
 int translate(const char *path, uint32_t *inum, struct fs_inode *inode) 
 {
-    char *components[MAX_PATH_LEN];
-    int num_components = pathparse(path, components);
-    uint32_t current_inum = 2;
-    
-    uint32_t parent_stack[MAX_PATH_LEN]; // Stack to keep track of parent inodes
-    int stack_pos = 0;
-    parent_stack[0] = 2; // Root's parent is itself
+	char *components[MAX_PATH_LEN];
+	int num_components = pathparse(path, components);
+	uint32_t current_inum = 2;
 
-    // Handle the case where the path is empty ("") or path is ("/")
-    if (num_components == 0) {
-        if (read_inode(current_inum, inode) != 0) {
-            perror("In translate: read_inode failed for root");
-            return -EIO;
-        }
-        *inum = current_inum;
-        return 0;
-    }
+	uint32_t parent_stack[MAX_PATH_LEN]; // Stack to keep track of parent inodes
+	int stack_pos = 0;
+	parent_stack[0] = 2; // Root's parent is itself
 
-    for (int i = 0; i < num_components; i++) 
-    {
-        if (strcmp(components[i], ".") == 0) {
-            continue;
-        }
+	// Handle the case where the path is empty ("") or path is ("/")
+	if (num_components == 0) {
+		if (read_inode(current_inum, inode) != 0) {
+			perror("In translate: read_inode failed for root");
+			return -EIO;
+		}
+		*inum = current_inum;
+		return 0;
+	}
 
-        if (strcmp(components[i], "..") == 0) {
-            if (stack_pos > 0) {
-                stack_pos--;
-                current_inum = parent_stack[stack_pos]; // Go to parent
-            }
-            continue;
-        }
+	for (int i = 0; i < num_components; i++) 
+	{
+		if (strcmp(components[i], ".") == 0) {
+			continue;
+		}
 
-        struct fs_inode current_inode;
-        if (read_inode(current_inum, &current_inode) != 0) 
-        {
-            perror("In translate: read_inode failed");
-            return -EIO;
-        }
+		if (strcmp(components[i], "..") == 0) {
+			if (stack_pos > 0) {
+				stack_pos--;
+				current_inum = parent_stack[stack_pos]; // Go to parent
+			}
+			continue;
+		}
 
-        if (!S_ISDIR(current_inode.mode)) 
-        {
-            perror("In translate: not a directory");
-            return -ENOTDIR;
-        }
-        int found = 0;
-        for (int j = 0; j < current_inode.size / FS_BLOCK_SIZE; j++) 
-        {
-            char block[FS_BLOCK_SIZE];
-            if (block_read(block, current_inode.ptrs[j], 1) != 0) 
-            {
-                perror("In translate: block read failed");
-                return -EIO;
-            }
-            struct fs_dirent *entries = (struct fs_dirent *)block;
-            for (int k = 0; k < FS_BLOCK_SIZE / sizeof(struct fs_dirent); k++) 
-            {
-                if (entries[k].valid && strcmp(entries[k].name, components[i]) == 0) 
-                {
-                    parent_stack[stack_pos + 1] = current_inum;
-                    stack_pos++;
-                    current_inum = entries[k].inode;
-                    found = 1;
-                    break;
-                }
-            }
-            if (found) 
-            {
-                break;
-            }
-        }
-        if (!found) 
-        {
-            return -ENOENT;
-        }
-    }
+		struct fs_inode current_inode;
+		if (read_inode(current_inum, &current_inode) != 0) 
+		{
+			perror("In translate: read_inode failed");
+			return -EIO;
+		}
 
-    if (read_inode(current_inum, inode) != 0) 
-    {
-        perror("In translate: read_inode failed for final inode");
-        return -EIO;
-    }
-    *inum = current_inum;
-    return 0;
+		if (!S_ISDIR(current_inode.mode)) 
+		{
+			perror("In translate: not a directory");
+			return -ENOTDIR;
+		}
+		int found = 0;
+		for (int j = 0; j < current_inode.size / FS_BLOCK_SIZE; j++) 
+		{
+			char block[FS_BLOCK_SIZE];
+			if (block_read(block, current_inode.ptrs[j], 1) != 0) 
+			{
+				perror("In translate: block read failed");
+				return -EIO;
+			}
+			struct fs_dirent *entries = (struct fs_dirent *)block;
+			for (int k = 0; k < FS_BLOCK_SIZE / sizeof(struct fs_dirent); k++) 
+			{
+				if (entries[k].valid && strcmp(entries[k].name, components[i]) == 0) 
+				{
+					parent_stack[stack_pos + 1] = current_inum;
+					stack_pos++;
+					current_inum = entries[k].inode;
+					found = 1;
+					break;
+				}
+			}
+			if (found) 
+			{
+				break;
+			}
+		}
+		if (!found) 
+		{
+			return -ENOENT;
+		}
+	}
+
+	if (read_inode(current_inum, inode) != 0) 
+	{
+		perror("In translate: read_inode failed for final inode");
+		return -EIO;
+	}
+	*inum = current_inum;
+	return 0;
 }
 
 int resolve_path(char **components, int num_components, char **resolved) 
 {
-    if (num_components <= 0) {
-        return 0;
-    }
+	if (num_components <= 0) {
+		return 0;
+	}
 
-    int resolved_index = 0;
-    for (int i = 0; i < num_components; i++) 
-    {
-        if (strcmp(components[i], ".") == 0) 
-        {
-            continue;
-        }
+	int resolved_index = 0;
+	for (int i = 0; i < num_components; i++) 
+	{
+		if (strcmp(components[i], ".") == 0) 
+		{
+			continue;
+		}
 
-        if (strcmp(components[i], "..") == 0) 
-        {
-            if (resolved_index > 0) 
-            {
-                free(resolved[resolved_index - 1]);
-                resolved_index--;
-            }
-            continue;
-        }
+		if (strcmp(components[i], "..") == 0) 
+		{
+			if (resolved_index > 0) 
+			{
+				free(resolved[resolved_index - 1]);
+				resolved_index--;
+			}
+			continue;
+		}
 
-        resolved[resolved_index] = strdup(components[i]);
-        if (!resolved[resolved_index]) 
-        {
-            for (int j = 0; j < resolved_index; j++) 
-            {
-                free(resolved[j]);
-            }
-            return -1;
-        }
-        resolved_index++;
-    }
-    
-    return resolved_index;
+		resolved[resolved_index] = strdup(components[i]);
+		if (!resolved[resolved_index]) 
+		{
+			for (int j = 0; j < resolved_index; j++) 
+			{
+				free(resolved[j]);
+			}
+			return -1;
+		}
+		resolved_index++;
+	}
+
+	return resolved_index;
 }
 
 void free_components(char **components, int num_components)
 {
-    if (components) {
-        for (int i = 0; i < num_components; i++) {
-            if (components[i]) {
-                free(components[i]);
-                components[i] = NULL;
-            }
-        }
-    }
+	if (components) {
+		for (int i = 0; i < num_components; i++) {
+			if (components[i]) {
+				free(components[i]);
+				components[i] = NULL;
+			}
+		}
+	}
 }
 
 // populate stat struct from inode
 void setstat(fs_inode inode, struct stat *sb) {	
-    sb->st_uid = inode.uid;
-    sb->st_gid = inode.gid;
-    sb->st_mode = inode.mode;
-    sb->st_size = inode.size;
-    sb->st_nlink = 1;
-    sb->st_atime = inode.mtime;
-    sb->st_mtime = inode.mtime;
-    sb->st_ctime = inode.ctime;
+	sb->st_uid = inode.uid;
+	sb->st_gid = inode.gid;
+	sb->st_mode = inode.mode;
+	sb->st_size = inode.size;
+	sb->st_nlink = 1;
+	sb->st_atime = inode.mtime;
+	sb->st_mtime = inode.mtime;
+	sb->st_ctime = inode.ctime;
 }
 
 /* getattr - get file or directory attributes. For a description of
@@ -316,17 +316,17 @@ void setstat(fs_inode inode, struct stat *sb) {
  */
 int fs_getattr(const char *path, struct stat *sb)
 {
-    uint32_t inum;
-    struct fs_inode inode;
-    int res = translate(path, &inum, &inode);
-    if (res != 0) 
-    {
-        return res;
-    }
+	uint32_t inum;
+	struct fs_inode inode;
+	int res = translate(path, &inum, &inode);
+	if (res != 0) 
+	{
+		return res;
+	}
 
 	setstat(inode, sb);
 
-    return 0;
+	return 0;
 }
 
 /* readdir - get directory contents.
@@ -343,50 +343,50 @@ int fs_getattr(const char *path, struct stat *sb)
  */
 int fs_readdir(const char *path, void *ptr, fuse_fill_dir_t filler, off_t offset, struct fuse_file_info *fi)
 {
-    uint32_t inum;
-    struct fs_inode inode;
-    int res = translate(path, &inum, &inode);
-    if (res != 0)
-    {
-        perror("In fs_readdir: translate failed");
-        return res;
-    }
-    if (!S_ISDIR(inode.mode)) 
-    {
-        perror("In fs_readdir: not a directory");
-        return -ENOTDIR;
-    }
+	uint32_t inum;
+	struct fs_inode inode;
+	int res = translate(path, &inum, &inode);
+	if (res != 0)
+	{
+		perror("In fs_readdir: translate failed");
+		return res;
+	}
+	if (!S_ISDIR(inode.mode)) 
+	{
+		perror("In fs_readdir: not a directory");
+		return -ENOTDIR;
+	}
 
-    //TODO Allow read if read permissions
-    for (int i = 0; i < inode.size / FS_BLOCK_SIZE; i++) 
-    {
-        char block[FS_BLOCK_SIZE];
-        if (block_read(block, inode.ptrs[i], 1) != 0) 
-        {
-            perror("In fs_readdir: block read failed");
-            return -EIO;
-        }
-        struct fs_dirent *entries = (struct fs_dirent *)block;
-        for (int j = 0; j < FS_BLOCK_SIZE / sizeof(struct fs_dirent); j++) 
-        {
-            if (entries[j].valid) {
-                struct stat st;
-                memset(&st, 0, sizeof(st));
-                
-                struct fs_inode entry_inode;
-                if (read_inode(entries[j].inode, &entry_inode) != 0) 
-                {
-                    continue;
-                }
-                
-		setstat(entry_inode, &st);
+	//TODO Allow read if read permissions
+	for (int i = 0; i < inode.size / FS_BLOCK_SIZE; i++) 
+	{
+		char block[FS_BLOCK_SIZE];
+		if (block_read(block, inode.ptrs[i], 1) != 0) 
+		{
+			perror("In fs_readdir: block read failed");
+			return -EIO;
+		}
+		struct fs_dirent *entries = (struct fs_dirent *)block;
+		for (int j = 0; j < FS_BLOCK_SIZE / sizeof(struct fs_dirent); j++) 
+		{
+			if (entries[j].valid) {
+				struct stat st;
+				memset(&st, 0, sizeof(st));
 
-                filler(ptr, entries[j].name, &st, 0);
-            }
-            
-        }
-    }
-    return 0;
+				struct fs_inode entry_inode;
+				if (read_inode(entries[j].inode, &entry_inode) != 0) 
+				{
+					continue;
+				}
+
+				setstat(entry_inode, &st);
+
+				filler(ptr, entries[j].name, &st, 0);
+			}
+
+		}
+	}
+	return 0;
 }
 
 /* create - create a new file with specified permissions
@@ -405,122 +405,122 @@ int fs_readdir(const char *path, void *ptr, fuse_fill_dir_t filler, off_t offset
  */
 int fs_create(const char *path, mode_t mode, struct fuse_file_info *fi)
 {
-    char *components[MAX_PATH_LEN];
-    int num_components = pathparse(path, components);
-    
-    char *resolved_components[MAX_PATH_LEN];
-    int resolved_count = resolve_path(components, num_components, resolved_components);
+	char *components[MAX_PATH_LEN];
+	int num_components = pathparse(path, components);
 
-    char *filename = resolved_components[resolved_count - 1];
+	char *resolved_components[MAX_PATH_LEN];
+	int resolved_count = resolve_path(components, num_components, resolved_components);
 
-    char parent_path[256] = "/";
-    for (int i = 0; i < resolved_count - 1; i++) {
-        strcat(parent_path, resolved_components[i]);
-    }
+	char *filename = resolved_components[resolved_count - 1];
 
-    uint32_t parent_inum;
-    struct fs_inode parent_inode;
-    int res = translate(parent_path, &parent_inum, &parent_inode);
-    if (res != 0) 
-    {
-        return res;
-    }
+	char parent_path[256] = "/";
+	for (int i = 0; i < resolved_count - 1; i++) {
+		strcat(parent_path, resolved_components[i]);
+	}
 
-    if (!S_ISDIR(parent_inode.mode)) 
-    {
-        return -ENOTDIR;
-    }
+	uint32_t parent_inum;
+	struct fs_inode parent_inode;
+	int res = translate(parent_path, &parent_inum, &parent_inode);
+	if (res != 0) 
+	{
+		return res;
+	}
 
-    for (int i = 0; i < parent_inode.size / FS_BLOCK_SIZE; i++) 
-    {
-        char block[FS_BLOCK_SIZE];
-        if (block_read(block, parent_inode.ptrs[i], 1) != 0) 
-        {
-            return -EIO;
-        }
-        struct fs_dirent *entries = (struct fs_dirent *)block;
-        for (int j = 0; j < FS_BLOCK_SIZE / sizeof(struct fs_dirent); j++) 
-        {
-            if (entries[j].valid && strcmp(entries[j].name, filename) == 0)
-            {
-                free_components(components, num_components);
-                free_components(resolved_components, resolved_count);
-                return -EEXIST;
-            }
-        }
-    }
-    
-    uint32_t inum = 0;
-    for (int i = 2; i < superblock.disk_size; i++) 
-    {
-        if (!bit_test(bitmap, i)) 
-        { 
-            inum = i; 
-            break; 
-        }
-    }
-    if (!inum) 
-    {
-        free_components(components, num_components);
-        free_components(resolved_components, resolved_count);
-        return -ENOSPC;
-    }
-    bit_set(bitmap, inum);
-    if (block_write(bitmap, 1, 1) != 0) 
-    {
-        return -EIO;
-    }
+	if (!S_ISDIR(parent_inode.mode)) 
+	{
+		return -ENOTDIR;
+	}
 
-    struct fs_inode new_inode;
-    memset(&new_inode, 0, sizeof(struct fs_inode));
+	for (int i = 0; i < parent_inode.size / FS_BLOCK_SIZE; i++) 
+	{
+		char block[FS_BLOCK_SIZE];
+		if (block_read(block, parent_inode.ptrs[i], 1) != 0) 
+		{
+			return -EIO;
+		}
+		struct fs_dirent *entries = (struct fs_dirent *)block;
+		for (int j = 0; j < FS_BLOCK_SIZE / sizeof(struct fs_dirent); j++) 
+		{
+			if (entries[j].valid && strcmp(entries[j].name, filename) == 0)
+			{
+				free_components(components, num_components);
+				free_components(resolved_components, resolved_count);
+				return -EEXIST;
+			}
+		}
+	}
 
-    struct fuse_context *ctx = fuse_get_context();
-    new_inode.uid = ctx->uid;
-    new_inode.gid = ctx->gid;
-    new_inode.mode = mode;
-    new_inode.ctime = time(NULL);
-    new_inode.mtime = new_inode.ctime;
-    new_inode.size = 0;
+	uint32_t inum = 0;
+	for (int i = 2; i < superblock.disk_size; i++) 
+	{
+		if (!bit_test(bitmap, i)) 
+		{ 
+			inum = i; 
+			break; 
+		}
+	}
+	if (!inum) 
+	{
+		free_components(components, num_components);
+		free_components(resolved_components, resolved_count);
+		return -ENOSPC;
+	}
+	bit_set(bitmap, inum);
+	if (block_write(bitmap, 1, 1) != 0) 
+	{
+		return -EIO;
+	}
 
-    // setting file inode
-    char inode_block[FS_BLOCK_SIZE];
-    memset(inode_block, 0, FS_BLOCK_SIZE);
-    memcpy(inode_block, &new_inode, sizeof(new_inode));
-    if (block_write(inode_block, inum, 1) != 0) 
-    {
-        bit_clear(bitmap, inum);
-        block_write(bitmap, 1, 1);
-        return -EIO;
-    }
+	struct fs_inode new_inode;
+	memset(&new_inode, 0, sizeof(struct fs_inode));
 
-    // add the new file to the parent directory
-    for (int i = 0; i < parent_inode.size / FS_BLOCK_SIZE; i++) 
-    {
-        char block[FS_BLOCK_SIZE];
-        if (block_read(block, parent_inode.ptrs[i], 1) != 0) 
-        {
-            return -EIO;
-        }
-        struct fs_dirent *entries = (struct fs_dirent *)block;
-        for (int j = 0; j < FS_BLOCK_SIZE / sizeof(struct fs_dirent); j++) 
-        {
-            if (!entries[j].valid) 
-            {
-                entries[j].valid = 1;
-                entries[j].inode = inum;
-                strncpy(entries[j].name, filename, MAX_NAME_LEN);
-                entries[j].name[MAX_NAME_LEN - 1] = '\0';
-                if (block_write(block, parent_inode.ptrs[i], 1) != 0) 
-                {
-                    return -EIO;
-                }
-                return 0;
-            }
-        }
-    }
-    free_components(components, num_components);
-    free_components(resolved_components, resolved_count);
-    return -ENOSPC;
+	struct fuse_context *ctx = fuse_get_context();
+	new_inode.uid = ctx->uid;
+	new_inode.gid = ctx->gid;
+	new_inode.mode = mode;
+	new_inode.ctime = time(NULL);
+	new_inode.mtime = new_inode.ctime;
+	new_inode.size = 0;
+
+	// setting file inode
+	char inode_block[FS_BLOCK_SIZE];
+	memset(inode_block, 0, FS_BLOCK_SIZE);
+	memcpy(inode_block, &new_inode, sizeof(new_inode));
+	if (block_write(inode_block, inum, 1) != 0) 
+	{
+		bit_clear(bitmap, inum);
+		block_write(bitmap, 1, 1);
+		return -EIO;
+	}
+
+	// add the new file to the parent directory
+	for (int i = 0; i < parent_inode.size / FS_BLOCK_SIZE; i++) 
+	{
+		char block[FS_BLOCK_SIZE];
+		if (block_read(block, parent_inode.ptrs[i], 1) != 0) 
+		{
+			return -EIO;
+		}
+		struct fs_dirent *entries = (struct fs_dirent *)block;
+		for (int j = 0; j < FS_BLOCK_SIZE / sizeof(struct fs_dirent); j++) 
+		{
+			if (!entries[j].valid) 
+			{
+				entries[j].valid = 1;
+				entries[j].inode = inum;
+				strncpy(entries[j].name, filename, MAX_NAME_LEN);
+				entries[j].name[MAX_NAME_LEN - 1] = '\0';
+				if (block_write(block, parent_inode.ptrs[i], 1) != 0) 
+				{
+					return -EIO;
+				}
+				return 0;
+			}
+		}
+	}
+	free_components(components, num_components);
+	free_components(resolved_components, resolved_count);
+	return -ENOSPC;
 }
 
 /* mkdir - create a directory with the given mode.
@@ -534,122 +534,122 @@ int fs_create(const char *path, mode_t mode, struct fuse_file_info *fi)
  */ 
 int fs_mkdir(const char *path, mode_t mode)
 {
-    char *components[MAX_PATH_LEN];
-    int num_components = pathparse(path, components);
-    
-    char *resolved_components[MAX_PATH_LEN];
-    int resolved_count = resolve_path(components, num_components, resolved_components);
+	char *components[MAX_PATH_LEN];
+	int num_components = pathparse(path, components);
 
-    char *dirname = resolved_components[resolved_count - 1];
+	char *resolved_components[MAX_PATH_LEN];
+	int resolved_count = resolve_path(components, num_components, resolved_components);
 
-    char parent_path[256] = "/";
-    for (int i = 0; i < resolved_count - 1; i++) {
-        strcat(parent_path, resolved_components[i]);
-    }
+	char *dirname = resolved_components[resolved_count - 1];
 
-    uint32_t parent_inum;
-    struct fs_inode parent_inode;
-    int res = translate(parent_path, &parent_inum, &parent_inode);
-    if (res != 0) 
-    {
-        return res;
-    }
+	char parent_path[256] = "/";
+	for (int i = 0; i < resolved_count - 1; i++) {
+		strcat(parent_path, resolved_components[i]);
+	}
 
-    if (!S_ISDIR(parent_inode.mode)) 
-    {
-        return -ENOTDIR;
-    }
+	uint32_t parent_inum;
+	struct fs_inode parent_inode;
+	int res = translate(parent_path, &parent_inum, &parent_inode);
+	if (res != 0) 
+	{
+		return res;
+	}
 
-    for (int i = 0; i < parent_inode.size / FS_BLOCK_SIZE; i++) 
-    {
-        char block[FS_BLOCK_SIZE];
-        if (block_read(block, parent_inode.ptrs[i], 1) != 0) 
-        {
-            return -EIO;
-        }
-        struct fs_dirent *entries = (struct fs_dirent *)block;
-        for (int j = 0; j < FS_BLOCK_SIZE / sizeof(struct fs_dirent); j++) 
-        {
-            if (entries[j].valid && strcmp(entries[j].name, dirname) == 0)
-            {
-                return -EEXIST;
-            }
-        }
-    }
+	if (!S_ISDIR(parent_inode.mode)) 
+	{
+		return -ENOTDIR;
+	}
 
-    uint32_t dir_inum = 0, data_block = 0;
-    for (int i = 2; i < superblock.disk_size; i++) 
-    {
-        if (!dir_inum && !bit_test(bitmap, i)) 
-        {
-            dir_inum = i;
-        } else if (!data_block && !bit_test(bitmap, i)) 
-        {
-            data_block = i;
-            break;
-        }
-    }
-    if (!dir_inum || !data_block) 
-    {
-        return -ENOSPC;
-    }
-    bit_set(bitmap, dir_inum);
-    bit_set(bitmap, data_block);
-    if (block_write(bitmap, 1, 1) != 0) 
-    {
-        return -EIO;
-    }
+	for (int i = 0; i < parent_inode.size / FS_BLOCK_SIZE; i++) 
+	{
+		char block[FS_BLOCK_SIZE];
+		if (block_read(block, parent_inode.ptrs[i], 1) != 0) 
+		{
+			return -EIO;
+		}
+		struct fs_dirent *entries = (struct fs_dirent *)block;
+		for (int j = 0; j < FS_BLOCK_SIZE / sizeof(struct fs_dirent); j++) 
+		{
+			if (entries[j].valid && strcmp(entries[j].name, dirname) == 0)
+			{
+				return -EEXIST;
+			}
+		}
+	}
 
-    struct fs_inode dir_inode;
-    memset(&dir_inode, 0, sizeof(struct fs_inode));
+	uint32_t dir_inum = 0, data_block = 0;
+	for (int i = 2; i < superblock.disk_size; i++) 
+	{
+		if (!dir_inum && !bit_test(bitmap, i)) 
+		{
+			dir_inum = i;
+		} else if (!data_block && !bit_test(bitmap, i)) 
+		{
+			data_block = i;
+			break;
+		}
+	}
+	if (!dir_inum || !data_block) 
+	{
+		return -ENOSPC;
+	}
+	bit_set(bitmap, dir_inum);
+	bit_set(bitmap, data_block);
+	if (block_write(bitmap, 1, 1) != 0) 
+	{
+		return -EIO;
+	}
 
-    struct fuse_context *ctx = fuse_get_context();
-    dir_inode.uid = ctx->uid;
-    dir_inode.gid = ctx->gid;
-    dir_inode.mode = S_IFDIR | mode,
-    dir_inode.ctime = time(NULL);
-    dir_inode.mtime = dir_inode.ctime;
-    dir_inode.size = FS_BLOCK_SIZE;
-    dir_inode.ptrs[0] = data_block;  
+	struct fs_inode dir_inode;
+	memset(&dir_inode, 0, sizeof(struct fs_inode));
 
-    char inode_block[FS_BLOCK_SIZE];
-    memset(inode_block, 0, FS_BLOCK_SIZE);
-    memcpy(inode_block, &dir_inode, sizeof(dir_inode));
-    if (block_write(inode_block, dir_inum, 1) != 0) 
-    {
-        bit_clear(bitmap, dir_inum);
-        bit_clear(bitmap, data_block);
-        block_write(bitmap, 1, 1);
-        return -EIO;
-    }
+	struct fuse_context *ctx = fuse_get_context();
+	dir_inode.uid = ctx->uid;
+	dir_inode.gid = ctx->gid;
+	dir_inode.mode = S_IFDIR | mode,
+		dir_inode.ctime = time(NULL);
+	dir_inode.mtime = dir_inode.ctime;
+	dir_inode.size = FS_BLOCK_SIZE;
+	dir_inode.ptrs[0] = data_block;  
 
-    for (int i = 0; i < parent_inode.size / FS_BLOCK_SIZE; i++) 
-    {
-        char block[FS_BLOCK_SIZE];
-        if (block_read(block, parent_inode.ptrs[i], 1) != 0) 
-        {
-            return -EIO;
-        }
-        struct fs_dirent *entries = (struct fs_dirent *)block;
-        for (int j = 0; j < FS_BLOCK_SIZE / sizeof(struct fs_dirent); j++) 
-        {
-            if (!entries[j].valid) 
-            {
-                entries[j].valid = 1;
-                entries[j].inode = dir_inum;
-                strncpy(entries[j].name, dirname, MAX_NAME_LEN);
-                entries[j].name[MAX_NAME_LEN - 1] = '\0';
-                if (block_write(block, parent_inode.ptrs[i], 1) != 0) 
-                {
-                    return -EIO;
-                }
-                return 0;
-            }
-        }
-    }
-    free_components(components, num_components);
-    free_components(resolved_components, resolved_count);
-    return -EOPNOTSUPP;
+	char inode_block[FS_BLOCK_SIZE];
+	memset(inode_block, 0, FS_BLOCK_SIZE);
+	memcpy(inode_block, &dir_inode, sizeof(dir_inode));
+	if (block_write(inode_block, dir_inum, 1) != 0) 
+	{
+		bit_clear(bitmap, dir_inum);
+		bit_clear(bitmap, data_block);
+		block_write(bitmap, 1, 1);
+		return -EIO;
+	}
+
+	for (int i = 0; i < parent_inode.size / FS_BLOCK_SIZE; i++) 
+	{
+		char block[FS_BLOCK_SIZE];
+		if (block_read(block, parent_inode.ptrs[i], 1) != 0) 
+		{
+			return -EIO;
+		}
+		struct fs_dirent *entries = (struct fs_dirent *)block;
+		for (int j = 0; j < FS_BLOCK_SIZE / sizeof(struct fs_dirent); j++) 
+		{
+			if (!entries[j].valid) 
+			{
+				entries[j].valid = 1;
+				entries[j].inode = dir_inum;
+				strncpy(entries[j].name, dirname, MAX_NAME_LEN);
+				entries[j].name[MAX_NAME_LEN - 1] = '\0';
+				if (block_write(block, parent_inode.ptrs[i], 1) != 0) 
+				{
+					return -EIO;
+				}
+				return 0;
+			}
+		}
+	}
+	free_components(components, num_components);
+	free_components(resolved_components, resolved_count);
+	return -EOPNOTSUPP;
 }
 
 
@@ -659,8 +659,8 @@ int fs_mkdir(const char *path, mode_t mode)
  */
 int fs_unlink(const char *path)
 {
-    /* your code here */
-    return -EOPNOTSUPP;
+	/* your code here */
+	return -EOPNOTSUPP;
 }
 
 /* rmdir - remove a directory
@@ -669,8 +669,8 @@ int fs_unlink(const char *path)
  */
 int fs_rmdir(const char *path)
 {
-    /* your code here */
-    return -EOPNOTSUPP;
+	/* your code here */
+	return -EOPNOTSUPP;
 }
 
 /* rename - rename a file or directory
@@ -688,109 +688,109 @@ int fs_rmdir(const char *path)
  */
 int fs_rename(const char *src_path, const char *dst_path)
 {
-    uint32_t src_inum;
-    struct fs_inode src_inode;
-    if (translate(src_path, &src_inum, &src_inode) != 0)
-    {
-        return -ENOENT;
-    }
+	uint32_t src_inum;
+	struct fs_inode src_inode;
+	if (translate(src_path, &src_inum, &src_inode) != 0)
+	{
+		return -ENOENT;
+	}
 
-    char *src_components[MAX_PATH_LEN], *dst_components[MAX_PATH_LEN];
-    int src_count = pathparse(src_path, src_components);
-    int dst_count = pathparse(dst_path, dst_components);
+	char *src_components[MAX_PATH_LEN], *dst_components[MAX_PATH_LEN];
+	int src_count = pathparse(src_path, src_components);
+	int dst_count = pathparse(dst_path, dst_components);
 
-    char *resolved_srcpath[MAX_PATH_LEN], *resolved_dstpath[MAX_PATH_LEN];
-    int resolved_count_src = resolve_path(src_components, src_count, resolved_srcpath);
-    int resolved_count_dst = resolve_path(dst_components, dst_count, resolved_dstpath);
+	char *resolved_srcpath[MAX_PATH_LEN], *resolved_dstpath[MAX_PATH_LEN];
+	int resolved_count_src = resolve_path(src_components, src_count, resolved_srcpath);
+	int resolved_count_dst = resolve_path(dst_components, dst_count, resolved_dstpath);
 
-    char *src_name = resolved_srcpath[resolved_count_src - 1];
-    char *dst_name = resolved_dstpath[resolved_count_dst - 1];
+	char *src_name = resolved_srcpath[resolved_count_src - 1];
+	char *dst_name = resolved_dstpath[resolved_count_dst - 1];
 
-    char parent_src_path[256] = "/";
-    char parent_dst_path[256] = "/";
-    
-    for (int i = 0; i < resolved_count_src - 1; i++) {
-        strcat(parent_src_path, resolved_srcpath[i]);
-    }
-    for (int i = 0; i < resolved_count_dst - 1; i++) {
-        strcat(parent_dst_path, resolved_dstpath[i]);
-    }
+	char parent_src_path[256] = "/";
+	char parent_dst_path[256] = "/";
 
-    uint32_t src_parent_inum, dst_parent_inum;
-    struct fs_inode dummy_inode;
+	for (int i = 0; i < resolved_count_src - 1; i++) {
+		strcat(parent_src_path, resolved_srcpath[i]);
+	}
+	for (int i = 0; i < resolved_count_dst - 1; i++) {
+		strcat(parent_dst_path, resolved_dstpath[i]);
+	}
 
-    
-    if (translate(parent_src_path, &src_parent_inum, &dummy_inode) != 0 ||
-        translate(parent_dst_path, &dst_parent_inum, &dummy_inode) != 0) {
-        return -ENOENT;
-    }
+	uint32_t src_parent_inum, dst_parent_inum;
+	struct fs_inode dummy_inode;
 
-    if (src_parent_inum != dst_parent_inum) {
-        return -EINVAL;
-    }
 
-    uint32_t parent_inum;
-    struct fs_inode parent_inode;
-    int res = translate(parent_src_path, &parent_inum, &parent_inode);
-    if (res != 0) 
-    {
-        return res;
-    }
+	if (translate(parent_src_path, &src_parent_inum, &dummy_inode) != 0 ||
+			translate(parent_dst_path, &dst_parent_inum, &dummy_inode) != 0) {
+		return -ENOENT;
+	}
 
-    if (!S_ISDIR(parent_inode.mode)) 
-    {
-        return -ENOTDIR;
-    }
+	if (src_parent_inum != dst_parent_inum) {
+		return -EINVAL;
+	}
 
-    struct fs_dirent *src_entry = NULL;
-    struct fs_dirent *dst_entry = NULL;
+	uint32_t parent_inum;
+	struct fs_inode parent_inode;
+	int res = translate(parent_src_path, &parent_inum, &parent_inode);
+	if (res != 0) 
+	{
+		return res;
+	}
 
-    for (int i = 0; i < parent_inode.size / FS_BLOCK_SIZE; i++) 
-    {
-        char block[FS_BLOCK_SIZE];
-        if (block_read(block, parent_inode.ptrs[i], 1) != 0) 
-        {
-            perror("In fs_rename: block read failed");
-            return -EIO;
-        }
-        struct fs_dirent *entries = (struct fs_dirent *)block;
-        for (int j = 0; j < FS_BLOCK_SIZE / sizeof(struct fs_dirent); j++) 
-        {
-            if (!entries[j].valid) 
-            {
-                continue;
-            }
-            if (strcmp(entries[j].name, src_name) == 0) 
-            {
-                src_entry = &entries[j];
-            } 
-            else if (strcmp(entries[j].name, dst_name) == 0) 
-            {
-                dst_entry = &entries[j];
-            }
-        }
-        
-        if (src_entry && dst_entry) 
-        {
-            return -EEXIST;
-        }
+	if (!S_ISDIR(parent_inode.mode)) 
+	{
+		return -ENOTDIR;
+	}
 
-        if (src_entry && !dst_entry) 
-        {
-            strncpy(src_entry->name, dst_name, MAX_NAME_LEN); // Rename source entry
-            src_entry->name[MAX_NAME_LEN - 1] = '\0'; // Ensure null termination
+	struct fs_dirent *src_entry = NULL;
+	struct fs_dirent *dst_entry = NULL;
 
-            if (block_write(block, parent_inode.ptrs[i], 1) != 0) 
-            {
-                perror("In fs_rename: block write failed");
-                return -EIO;
-            }
+	for (int i = 0; i < parent_inode.size / FS_BLOCK_SIZE; i++) 
+	{
+		char block[FS_BLOCK_SIZE];
+		if (block_read(block, parent_inode.ptrs[i], 1) != 0) 
+		{
+			perror("In fs_rename: block read failed");
+			return -EIO;
+		}
+		struct fs_dirent *entries = (struct fs_dirent *)block;
+		for (int j = 0; j < FS_BLOCK_SIZE / sizeof(struct fs_dirent); j++) 
+		{
+			if (!entries[j].valid) 
+			{
+				continue;
+			}
+			if (strcmp(entries[j].name, src_name) == 0) 
+			{
+				src_entry = &entries[j];
+			} 
+			else if (strcmp(entries[j].name, dst_name) == 0) 
+			{
+				dst_entry = &entries[j];
+			}
+		}
 
-            return 0;
-        }
-    }
-    
-    return -EOPNOTSUPP;
+		if (src_entry && dst_entry) 
+		{
+			return -EEXIST;
+		}
+
+		if (src_entry && !dst_entry) 
+		{
+			strncpy(src_entry->name, dst_name, MAX_NAME_LEN); // Rename source entry
+			src_entry->name[MAX_NAME_LEN - 1] = '\0'; // Ensure null termination
+
+			if (block_write(block, parent_inode.ptrs[i], 1) != 0) 
+			{
+				perror("In fs_rename: block write failed");
+				return -EIO;
+			}
+
+			return 0;
+		}
+	}
+
+	return -EOPNOTSUPP;
 }
 
 /* chmod - change file permissions
@@ -802,33 +802,33 @@ int fs_rename(const char *src_path, const char *dst_path)
  */
 int fs_chmod(const char *path, mode_t mode)
 {
-    uint32_t inum;
-    struct fs_inode inode;
-    int res = translate(path, &inum, &inode);
-    if (res != 0) 
-    {
-        perror("In fs_chmod: translate failed");
-        return res;
-    }
-    inode.mode = (inode.mode & S_IFMT) | (mode & 0777);
-    char block[FS_BLOCK_SIZE];
-    memcpy(block, &inode, sizeof(inode));
+	uint32_t inum;
+	struct fs_inode inode;
+	int res = translate(path, &inum, &inode);
+	if (res != 0) 
+	{
+		perror("In fs_chmod: translate failed");
+		return res;
+	}
+	inode.mode = (inode.mode & S_IFMT) | (mode & 0777);
+	char block[FS_BLOCK_SIZE];
+	memcpy(block, &inode, sizeof(inode));
 
-    // time_t current_time = time(NULL);
-    // inode.mtime = current_time;
-    
-    if (block_write(block, inum, 1) != 0) 
-    {
-        perror("In fs_chmod: block write failed");
-        return -EIO;
-    }
-    return 0;
+	// time_t current_time = time(NULL);
+	// inode.mtime = current_time;
+
+	if (block_write(block, inum, 1) != 0) 
+	{
+		perror("In fs_chmod: block write failed");
+		return -EIO;
+	}
+	return 0;
 }
 
 int fs_utime(const char *path, struct utimbuf *ut)
 {
-    /* your code here */
-    return -EOPNOTSUPP;
+	/* your code here */
+	return -EOPNOTSUPP;
 }
 
 /* truncate - truncate file to exactly 'len' bytes
@@ -838,14 +838,14 @@ int fs_utime(const char *path, struct utimbuf *ut)
  */
 int fs_truncate(const char *path, off_t len)
 {
-    /* you can cheat by only implementing this for the case of len==0,
-     * and an error otherwise.
-     */
-    if (len != 0)
-	return -EINVAL;		/* invalid argument */
+	/* you can cheat by only implementing this for the case of len==0,
+	 * and an error otherwise.
+	 */
+	if (len != 0)
+		return -EINVAL;		/* invalid argument */
 
-    /* your code here */
-    return -EOPNOTSUPP;
+	/* your code here */
+	return -EOPNOTSUPP;
 }
 
 
@@ -857,51 +857,51 @@ int fs_truncate(const char *path, off_t len)
  * Errors - path resolution, ENOENT, EISDIR
  */
 
- //TODO: change error return values to match the assignment
+//TODO: change error return values to match the assignment
 int fs_read(const char *path, char *buf, size_t len, off_t offset, struct fuse_file_info *fi)
 {
-    uint32_t inum;
-    struct fs_inode inode;
-    int res = translate(path, &inum, &inode);
-    if (res != 0) 
-    {
-        return res;
-    }
-    if (!S_ISREG(inode.mode)) 
-    {
-        return -EISDIR;
-    }
-    if (offset >= inode.size) 
-    {
-        return 0;
-    }
-    if (offset + len > inode.size) 
-    {
-        len = inode.size - offset;
-    }
-    //TODO Allow read if read permissions
-    size_t bytes_read = 0;
-    while (bytes_read < len) 
-    {
-        uint32_t block_index = (offset + bytes_read) / FS_BLOCK_SIZE;
-        uint32_t block_offset = (offset + bytes_read) % FS_BLOCK_SIZE;
-        uint32_t block = inode.ptrs[block_index];
-        char block_data[FS_BLOCK_SIZE];
-        if (block_read(block_data, block, 1) != 0) 
-        {
-            perror("In fs_read: block read failed");
-            return -EIO;
-        }
+	uint32_t inum;
+	struct fs_inode inode;
+	int res = translate(path, &inum, &inode);
+	if (res != 0) 
+	{
+		return res;
+	}
+	if (!S_ISREG(inode.mode)) 
+	{
+		return -EISDIR;
+	}
+	if (offset >= inode.size) 
+	{
+		return 0;
+	}
+	if (offset + len > inode.size) 
+	{
+		len = inode.size - offset;
+	}
+	//TODO Allow read if read permissions
+	size_t bytes_read = 0;
+	while (bytes_read < len) 
+	{
+		uint32_t block_index = (offset + bytes_read) / FS_BLOCK_SIZE;
+		uint32_t block_offset = (offset + bytes_read) % FS_BLOCK_SIZE;
+		uint32_t block = inode.ptrs[block_index];
+		char block_data[FS_BLOCK_SIZE];
+		if (block_read(block_data, block, 1) != 0) 
+		{
+			perror("In fs_read: block read failed");
+			return -EIO;
+		}
 
-        size_t copy_len = FS_BLOCK_SIZE - block_offset;
-        if (copy_len > len - bytes_read) 
-        {
-            copy_len = len - bytes_read;
-        }
-        memcpy(buf + bytes_read, block_data + block_offset, copy_len);
-        bytes_read += copy_len;
-    }
-    return bytes_read;
+		size_t copy_len = FS_BLOCK_SIZE - block_offset;
+		if (copy_len > len - bytes_read) 
+		{
+			copy_len = len - bytes_read;
+		}
+		memcpy(buf + bytes_read, block_data + block_offset, copy_len);
+		bytes_read += copy_len;
+	}
+	return bytes_read;
 }
 
 /* write - write data to a file
@@ -913,10 +913,10 @@ int fs_read(const char *path, char *buf, size_t len, off_t offset, struct fuse_f
  *   but we don't)
  */
 int fs_write(const char *path, const char *buf, size_t len,
-	     off_t offset, struct fuse_file_info *fi)
+		off_t offset, struct fuse_file_info *fi)
 {
-    /* your code here */
-    return -EOPNOTSUPP;
+	/* your code here */
+	return -EOPNOTSUPP;
 }
 
 /* statfs - get file system statistics
@@ -925,52 +925,52 @@ int fs_write(const char *path, const char *buf, size_t len,
  */
 int fs_statfs(const char *path, struct statvfs *st)
 {
-    /* needs to return the following fields (set others to zero):
-     *   f_bsize = BLOCK_SIZE
-     *   f_blocks = total image - (superblock + block map)
-     *   f_bfree = f_blocks - blocks used
-     *   f_bavail = f_bfree
-     *   f_namemax = <whatever your max namelength is>
-     *
-     * it's OK to calculate this dynamically on the rare occasions
-     * when this function is called.
-     */
-    memset(st, 0, sizeof(struct statvfs)); // To zero the structure's other values
-    st->f_bsize = FS_BLOCK_SIZE;
-    int total_blocks = superblock.disk_size;
-    int metadata_blocks = 1 + 1; // 1 for superblock + 1 bitmap block
-    st->f_blocks = total_blocks - metadata_blocks;
+	/* needs to return the following fields (set others to zero):
+	 *   f_bsize = BLOCK_SIZE
+	 *   f_blocks = total image - (superblock + block map)
+	 *   f_bfree = f_blocks - blocks used
+	 *   f_bavail = f_bfree
+	 *   f_namemax = <whatever your max namelength is>
+	 *
+	 * it's OK to calculate this dynamically on the rare occasions
+	 * when this function is called.
+	 */
+	memset(st, 0, sizeof(struct statvfs)); // To zero the structure's other values
+	st->f_bsize = FS_BLOCK_SIZE;
+	int total_blocks = superblock.disk_size;
+	int metadata_blocks = 1 + 1; // 1 for superblock + 1 bitmap block
+	st->f_blocks = total_blocks - metadata_blocks;
 
-    int used_blocks = 0;
-    for (int i = 0; i < superblock.disk_size; i++) {
-        if (bit_test(bitmap, i)) 
-        {
-            used_blocks++;
-        }
-    }
-    st->f_bfree = st->f_blocks - used_blocks;
-    st->f_bavail = st->f_bfree;
-    st->f_namemax = MAX_NAME_LEN;
-    return 0;
+	int used_blocks = 0;
+	for (int i = 0; i < superblock.disk_size; i++) {
+		if (bit_test(bitmap, i)) 
+		{
+			used_blocks++;
+		}
+	}
+	st->f_bfree = st->f_blocks - used_blocks;
+	st->f_bavail = st->f_bfree;
+	st->f_namemax = MAX_NAME_LEN;
+	return 0;
 }
 
 /* operations vector. Please don't rename it, or else you'll break things
  */
 struct fuse_operations fs_ops = {
-    .init = fs_init,            /* read-mostly operations */
-    .getattr = fs_getattr,
-    .readdir = fs_readdir,
-    .rename = fs_rename,
-    .chmod = fs_chmod,
-    .read = fs_read,
-    .statfs = fs_statfs,
+	.init = fs_init,            /* read-mostly operations */
+	.getattr = fs_getattr,
+	.readdir = fs_readdir,
+	.rename = fs_rename,
+	.chmod = fs_chmod,
+	.read = fs_read,
+	.statfs = fs_statfs,
 
-    .create = fs_create,        /* write operations */
-    .mkdir = fs_mkdir,
-    .unlink = fs_unlink,
-    .rmdir = fs_rmdir,
-    .utime = fs_utime,
-    .truncate = fs_truncate,
-    .write = fs_write,
+	.create = fs_create,        /* write operations */
+	.mkdir = fs_mkdir,
+	.unlink = fs_unlink,
+	.rmdir = fs_rmdir,
+	.utime = fs_utime,
+	.truncate = fs_truncate,
+	.write = fs_write,
 };
 
