@@ -987,6 +987,7 @@ int fs_rename(const char *src_path, const char *dst_path)
 	return -EOPNOTSUPP;
 }
 
+// TODO: Should times be updated on each operation?
 /* chmod - change file permissions
  * utime - change access and modification times
  *         (for definition of 'struct utimebuf', see 'man utime')
@@ -1021,8 +1022,25 @@ int fs_chmod(const char *path, mode_t mode)
 
 int fs_utime(const char *path, struct utimbuf *ut)
 {
-	/* your code here */
-	return -EOPNOTSUPP;
+	uint32_t inum;
+	struct fs_inode inode;
+	int res = translate(path, &inum, &inode);
+	if (res != 0) 
+	{
+		perror("In fs_utime: translate failed");
+		return res;
+	}
+	inode.mtime = ut->modtime;
+	// there is no access time in the inode
+	char block[FS_BLOCK_SIZE];
+	memcpy(block, &inode, sizeof(inode));
+
+	if (block_write(block, inum, 1) != 0) 
+	{
+		perror("In fs_chmod: block write failed");
+		return -EIO;
+	}
+	return 0;
 }
 
 /* truncate - truncate file to exactly 'len' bytes
