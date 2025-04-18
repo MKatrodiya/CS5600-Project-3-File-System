@@ -914,23 +914,15 @@ int fs_rename(const char *src_path, const char *dst_path)
     }
     
     uint32_t src_parent_inum, dst_parent_inum;
-    struct fs_inode dummy_inode;
+    struct fs_inode parent_inode;
     
-    if (translate(parent_src_path, &src_parent_inum, &dummy_inode) != 0 ||
-        translate(parent_dst_path, &dst_parent_inum, &dummy_inode) != 0) {
+    if (translate(parent_src_path, &src_parent_inum, &parent_inode) != 0 ||
+        translate(parent_dst_path, &dst_parent_inum, &parent_inode) != 0) {
         return -ENOENT;
     }
 
     if (src_parent_inum != dst_parent_inum) {
         return -EINVAL;
-    }
-
-    uint32_t parent_inum;
-    struct fs_inode parent_inode;
-    int res = translate(parent_src_path, &parent_inum, &parent_inode);
-    if (res != 0) 
-    {
-        return res;
     }
 
     if (!S_ISDIR(parent_inode.mode)) 
