@@ -49,11 +49,12 @@ int readdir_filler(void *ptr, const char *name, const struct stat *stbuf, off_t 
 
 START_TEST(test_create_file)
 {
-    int rv = fs_ops.create("/testfile", 0100666, NULL);
+    // simple create in root directory
+    int rv = fs_ops.create("/testfile.txt", 0100666, NULL);
     ck_assert_int_eq(rv, 0);
     
     struct stat st;
-    rv = fs_ops.getattr("/testfile", &st);
+    rv = fs_ops.getattr("/testfile.txt", &st);
     ck_assert_int_eq(rv, 0);
     ck_assert_int_eq(st.st_uid, 500);
     ck_assert_int_eq(st.st_gid, 500);
@@ -65,7 +66,7 @@ START_TEST(test_create_file)
         const char *name;
         int seen;
     } dir_table[] = {
-        {"testfile", 0},
+        {"testfile.txt", 0},
         {NULL, 0}
     };
     
@@ -74,19 +75,68 @@ START_TEST(test_create_file)
     ck_assert_int_eq(dir_table[0].seen, 1);
 
     // testing nonexistent directory create
-    rv = fs_ops.create("/nonexistent/testfile", 0100666, NULL);
+    rv = fs_ops.create("/nonexistent/testfile.txt", 0100666, NULL);
     ck_assert_msg(rv == -ENOENT, "Create in nonexistent directory is failing");
 
-    // reate and recreate the file 
-    rv = fs_ops.create("/testfile2", 0100666, NULL);
+    // create and recreate the file 
+    rv = fs_ops.create("/testfile2.txt", 0100666, NULL);
     ck_assert_int_eq(rv, 0);
-    rv = fs_ops.create("/testfile2", 0100666, NULL);
+    rv = fs_ops.create("/testfile2.txt", 0100666, NULL);
     ck_assert_msg(rv == -EEXIST, "Recreating the same file is failing");
+
+    // create and recreate the file same name as dir
+    rv = fs_ops.mkdir("/test", 0777);
+    ck_assert_int_eq(rv, 0);
+    rv = fs_ops.create("/test", 0100666, NULL);
+    ck_assert_msg(rv == -EEXIST, "Recreating the same file is failing");
+
+    // create a file in a sub dir
+    rv = fs_ops.mkdir("/test2", 0777);
+    ck_assert_int_eq(rv, 0);
+    rv = fs_ops.create("/test2/testfile.txt", 0100666, NULL);
+    ck_assert_int_eq(rv, 0);
+
+    struct stat st2;
+    rv = fs_ops.getattr("/test2/testfile.txt", &st2);
+    ck_assert_int_eq(rv, 0);
+    ck_assert_int_eq(st2.st_uid, 500);
+    ck_assert_int_eq(st2.st_gid, 500);
+    ck_assert(S_ISREG(st2.st_mode));
+    ck_assert_int_eq(st2.st_mode & 0777, 0666);
+    ck_assert_int_eq(st2.st_size, 0);
+
+    // file as a directory in path
+    rv = fs_ops.create("/test3", 0100666, NULL);
+    ck_assert_int_eq(rv, 0);
+    rv = fs_ops.create("/test3/test4.txt", 0100666, NULL);
+    ck_assert_msg(rv == -ENOTDIR, "Accessing file as a directory.");
+
+
+    // create a file with a long name and truncate it
+    char long_filename[50] = "/";
+    for (int i = 0; i < 30; i++) {
+        strcat(long_filename, "a");
+    }
+    rv = fs_ops.create(long_filename, 0100666, NULL);
+    if (rv == 0) {
+        char truncated_name[MAX_NAME_LEN + 1] = "/"; // +1 for '/' and 26 characters + null terminator
+        for (int i = 0; i < 26; i++) {
+            truncated_name[i+1] = 'a';
+        }
+        truncated_name[27] = '\0'; 
+        
+        struct stat st_trunc;
+        rv = fs_ops.getattr(truncated_name, &st_trunc);
+        ck_assert_int_eq(rv, 0);
+    } else {
+        ck_assert_int_eq(rv, -EINVAL);
+    }
 }
 END_TEST
 
 START_TEST(test_mkdir_directory)
 {
+    // simple mkdir in root directory
     int rv = fs_ops.mkdir("/testdir", 0777);
     ck_assert_int_eq(rv, 0);
     
@@ -136,6 +186,229 @@ START_TEST(test_mkdir_directory)
     rv = fs_ops.readdir("/parentdir", dir_table2, readdir_filler, 0, NULL);
     ck_assert_int_eq(rv, 0);
     ck_assert_int_eq(dir_table2[0].seen, 1);
+
+    // creating a directory with the same name as a file
+    rv = fs_ops.create("/testfile", 0100666, NULL);
+    ck_assert_int_eq(rv, 0);
+    rv = fs_ops.mkdir("/testfile", 0777);
+    ck_assert_msg(rv == -EEXIST, "Fail: Creating a directory with the same name as a");
+    
+    // creating a directory with the same name as an existing directory
+    rv = fs_ops.mkdir("/testdir", 0777);
+    ck_assert_msg(rv == -EEXIST, "Fail: Creating a directory with the same name as an existing directory");
+
+    // creating a directory in a nonexistent path
+    rv = fs_ops.mkdir("/nonexistent/testdir", 0777);
+    ck_assert_msg(rv == -ENOENT, "Fail: Creating a directory in a nonexistent path");
+
+    // creating a directory with a file in the path
+    rv = fs_ops.create("/testfile4", 0100666, NULL);
+    ck_assert_int_eq(rv, 0);
+    rv = fs_ops.mkdir("/testfile4/subdir", 0777);
+    ck_assert_msg(rv == -ENOTDIR, "Fail: Creating a directory with a file in the path");
+
+
+    // creating a directory with a long name
+    char long_dirname[50] = "/";
+    for (int i = 0; i < 30; i++) {
+        strcat(long_dirname, "a");
+    }
+    rv = fs_ops.mkdir(long_dirname, 0777);
+    if (rv == 0) {
+        char truncated_name[MAX_NAME_LEN + 1] = "/"; // +1 for '/' and 26 characters + null terminator
+        for (int i = 0; i < 26; i++) {
+            truncated_name[i+1] = 'a';
+        }
+        truncated_name[27] = '\0'; 
+        
+        struct stat st_trunc;
+        rv = fs_ops.getattr(truncated_name, &st_trunc);
+        ck_assert_int_eq(rv, 0);
+    } else {
+        ck_assert_int_eq(rv, -EINVAL);
+    }
+}
+END_TEST
+
+
+START_TEST(test_unlink)
+{
+    // simple file unlink
+    int rv = fs_ops.create("/unlinkfile.txt", 0100666, NULL);
+    ck_assert_int_eq(rv, 0);
+    
+    struct {
+        char *name;
+        int seen;
+    } dir_table[] = {
+        {"unlinkfile.txt", 0},
+        {NULL, 0}
+    };
+    
+    rv = fs_ops.readdir("/", dir_table, readdir_filler, 0, NULL);
+    ck_assert_int_eq(rv, 0);
+    ck_assert_int_eq(dir_table[0].seen, 1);
+
+    rv = fs_ops.unlink("/unlinkfile.txt");
+    ck_assert_int_eq(rv, 0);
+    
+    struct {
+        char *name;
+        int seen;
+    } dir_table2[] = {
+        {"unlinkfile.txt", 0},
+        {NULL, 0}
+    };
+    
+    rv = fs_ops.readdir("/", dir_table2, readdir_filler, 0, NULL);
+    ck_assert_int_eq(rv, 0);
+    ck_assert_int_eq(dir_table2[0].seen, 0);
+
+    // unlinking a file that does not exist
+    rv = fs_ops.unlink("/nonexistent.txt");
+    ck_assert_msg(rv == -ENOENT, "Fail: Unlinking a file that does not exist");
+
+    // unlinking a directory
+    rv = fs_ops.mkdir("/unlinkdir", 0777);
+    ck_assert_int_eq(rv, 0);
+    rv = fs_ops.unlink("/unlinkdir");
+    ck_assert_msg(rv == -EISDIR, "Fail: Unlinking a directory should return EISDIR");
+
+    // unlinking a file in a nonexistent directory
+    rv = fs_ops.unlink("/nonexistent/unlinkfile.txt");
+    ck_assert_msg(rv == -ENOENT, "Fail: Unlinking a file in a nonexistent directory");
+}
+END_TEST
+
+START_TEST(test_rmdir)
+{
+    // simple rmdir in root directory
+    int rv = fs_ops.mkdir("/rmdirtest", 0777);
+    ck_assert_int_eq(rv, 0);
+    
+    struct stat st;
+    rv = fs_ops.getattr("/rmdirtest", &st);
+    ck_assert_int_eq(rv, 0);
+    ck_assert(S_ISDIR(st.st_mode));
+    
+    rv = fs_ops.rmdir("/rmdirtest");
+    ck_assert_int_eq(rv, 0);
+    
+    rv = fs_ops.getattr("/rmdirtest", &st);
+    ck_assert_msg(rv == -ENOENT, "Fail: Rmdir a directory that should not exist");
+
+    // rmdir a directory that does not exist
+    rv = fs_ops.rmdir("/nonexistentdir");
+    ck_assert_msg(rv == -ENOENT, "Fail: Rmdir a directory that does not exist");
+
+    // rmdir a file
+    rv = fs_ops.create("/rmdirfile.txt", 0100666, NULL);
+    ck_assert_int_eq(rv, 0);
+    rv = fs_ops.rmdir("/rmdirfile.txt");
+    ck_assert_msg(rv == -ENOTDIR, "Fail: Rmdir a file should return ENOTDIR");
+
+    // rmdir a directory that is not empty
+    rv = fs_ops.mkdir("/rmdirnotempty", 0777);
+    ck_assert_int_eq(rv, 0);
+    rv = fs_ops.create("/rmdirnotempty/file.txt", 0100666, NULL);
+    ck_assert_int_eq(rv, 0);
+    rv = fs_ops.rmdir("/rmdirnotempty");
+    ck_assert_msg(rv == -ENOTEMPTY, "Fail: Rmdir a directory that is not empty should return ENOTEMPTY");
+
+    // rmdir a directory in nonexistent path
+    rv = fs_ops.rmdir("/nonexistent/rmdirtest");
+    ck_assert_msg(rv == -ENOENT, "Fail: Rmdir a directory in nonexistent path should return ENOENT");
+}
+END_TEST
+
+START_TEST(test_write)
+{
+    // Simple write data to the file
+    int rv = fs_ops.create("/writefile.txt", 0100666, NULL);
+    ck_assert_int_eq(rv, 0);
+    
+    const char *test_data = "Hii, My Name is Mitul Nakrnai, I am a passionate and experienced developer.";
+    int data_len = strlen(test_data);
+    rv = fs_ops.write("/writefile.txt", test_data, data_len, 0, NULL);
+    ck_assert_int_eq(rv, data_len);
+
+    struct stat st;
+    rv = fs_ops.getattr("/writefile.txt", &st);
+    ck_assert_int_eq(rv, 0);
+    ck_assert_int_eq(st.st_size, data_len);
+
+    char read_buf[100];
+    rv = fs_ops.read("/writefile.txt", read_buf, data_len, 0, NULL);
+    ck_assert_int_eq(rv, data_len);
+    read_buf[data_len] = '\0';
+    
+    ck_assert_str_eq(read_buf, test_data);
+
+
+
+    // write data to a file with an offset
+    int rv2 = fs_ops.create("/writeoffset.txt", 0100666, NULL);
+    ck_assert_int_eq(rv2, 0);
+    
+    const char *initial_data = "Hi I am Mitul Nakrani, You can call me Lord Mitul.";
+    int initial_len = strlen(initial_data);
+    rv2 = fs_ops.write("/writeoffset.txt", initial_data, initial_len, 0, NULL);
+    ck_assert_int_eq(rv2, initial_len);
+    
+    // Write more data at an offset
+    const char *append_data = " - You can also call me Legend Mitul.";
+    int append_len = strlen(append_data);
+    rv2 = fs_ops.write("/writeoffset.txt", append_data, append_len, initial_len, NULL);
+    ck_assert_int_eq(rv2, append_len);
+    
+    struct stat st2;
+    rv2 = fs_ops.getattr("/writeoffset.txt", &st2);
+    ck_assert_int_eq(rv2, 0);
+    ck_assert_int_eq(st2.st_size, initial_len + append_len);
+    
+    char read_buf2[200];
+    rv2 = fs_ops.read("/writeoffset.txt", read_buf2, initial_len + append_len, 0, NULL);
+    ck_assert_int_eq(rv2, initial_len + append_len);
+    read_buf2[initial_len + append_len] = '\0';
+    
+    char expected[200];
+    strcpy(expected, initial_data);
+    strcat(expected, append_data);
+    ck_assert_str_eq(read_buf2, expected);
+
+
+
+
+
+    // Create a test file
+    int rv3 = fs_ops.create("/overwritefile.txt", 0100666, NULL);
+    ck_assert_int_eq(rv3, 0);
+    
+    const char *initial_data_to_overwrite = "Hi I am Mitul Nakrani, You can call me Lord Mitul.";
+    int initial_len_data = strlen(initial_data_to_overwrite);
+    rv3 = fs_ops.write("/overwritefile.txt", initial_data_to_overwrite, initial_len_data, 0, NULL);
+    ck_assert_int_eq(rv3, initial_len_data);
+    
+    const char *overwrite_data = "You can also call me Legend Mitul.";
+    int overwrite_len = strlen(overwrite_data);
+    rv3 = fs_ops.write("/overwritefile.txt", overwrite_data, overwrite_len, 0, NULL);
+    ck_assert_int_eq(rv3, overwrite_len);
+    
+    char read_buf3[200];
+    rv3 = fs_ops.read("/overwritefile.txt", read_buf3, initial_len_data, 0, NULL);
+    ck_assert_int_eq(rv3, initial_len_data);
+    read_buf[initial_len_data] = '\0';
+    
+    char expected2[200];
+    if (overwrite_len < initial_len_data) {
+        strncpy(expected2, overwrite_data, overwrite_len);
+        strncpy(expected2 + overwrite_len, initial_data_to_overwrite + overwrite_len, initial_len_data - overwrite_len);
+        expected[initial_len_data] = '\0';
+    } else {
+        strcpy(expected2, overwrite_data);
+    }
+    ck_assert_str_eq(read_buf3, expected2);
+
 }
 END_TEST
 
@@ -145,7 +418,6 @@ END_TEST
  *  fs_ops.read(path, buf, len, offset, NULL);
  *  fs_ops.statfs(path, struct statvfs *sv);
  */
-
 extern struct fuse_operations fs_ops;
 extern void block_init(char *file);
 
@@ -161,6 +433,9 @@ int main(int argc, char **argv)
 
     tcase_add_test(tc, test_create_file); 
     tcase_add_test(tc, test_mkdir_directory);
+    tcase_add_test(tc, test_unlink);
+    tcase_add_test(tc, test_rmdir);
+    tcase_add_test(tc, test_write);
     
 
     suite_add_tcase(s, tc);

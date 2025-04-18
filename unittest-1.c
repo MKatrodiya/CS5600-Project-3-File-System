@@ -106,10 +106,12 @@ int readdir_filler_check(void *ptr, const char *name, const struct stat *stbuf, 
 
 START_TEST(test_readdir_all_dirs)
 {
-    for (int d = 0; dir_contents[d].dir != NULL; d++) {
+    for (int d = 0; dir_contents[d].dir != NULL; d++) 
+    {
         // fill entry table for this dir
         int i;
-        for (i = 0; dir_contents[d].entries[i] != NULL; i++) {
+        for (i = 0; dir_contents[d].entries[i] != NULL; i++) 
+        {
             entry_table[i].name = dir_contents[d].entries[i];
             entry_table[i].seen = 0;
         }
@@ -118,16 +120,17 @@ START_TEST(test_readdir_all_dirs)
         int rv = fs_ops.readdir(dir_contents[d].dir, NULL, readdir_filler_check, 0, NULL);
         ck_assert_msg(rv == 0, "readdir failed for dir %s", dir_contents[d].dir);
 
-        for (i = 0; entry_table[i].name != NULL; i++) {
+        for (i = 0; entry_table[i].name != NULL; i++) 
+        {
             ck_assert_msg(entry_table[i].seen, "entry '%s' missing in dir '%s'", entry_table[i].name, dir_contents[d].dir);
         }
     }
 
-    // non-existent path (ENOENT)
+    //non-existent path (ENOENT)
     int rv = fs_ops.readdir("/no-path", NULL, readdir_filler_check, 0, NULL);
     ck_assert_int_eq(rv, -ENOENT);
 
-    // call readdir on a file (ENOTDIR)
+    //call readdir on a file (ENOTDIR)
     rv = fs_ops.readdir("/file.1k", NULL, readdir_filler_check, 0, NULL);
     ck_assert_int_eq(rv, -ENOTDIR);
 }
@@ -242,6 +245,26 @@ START_TEST(test_rename_file_and_directory)
     // Rename back
     rv = fs_ops.rename("/new_file.10", "/file.10");
     ck_assert_int_eq(rv, 0);
+
+    //deep path rename
+    rv = fs_ops.rename("/dir3/subdir/file.8k-", "/dir3/subdir/file.9k-");
+    ck_assert_msg(rv == 0, "Deep path rename failed");
+
+    struct stat st_old2;
+    rv = fs_ops.getattr("/dir3/subdir/file.8k-", &st_old2);
+    ck_assert_msg(rv == -ENOENT, "Old file '/dir2/file.4k+' still exists after rename");
+
+    struct stat st_new2;
+    rv = fs_ops.getattr("/dir3/subdir/file.9k-", &st_new2);
+    ck_assert_msg(rv == 0, "New file '/dir3/subdir/file.8k-' does not exist after rename");
+    ck_assert_int_eq(st_new2.st_size, 8190);
+    ck_assert_int_eq(st_new2.st_uid, 500);
+    ck_assert_int_eq(st_new2.st_gid, 500);
+    ck_assert(S_ISREG(st_new2.st_mode));
+
+    rv = fs_ops.rename("/dir3/subdir/file.9k-", "/dir3/subdir/file.8k-");
+    ck_assert_int_eq(rv, 0);
+
 
     rv = fs_ops.rename("/dir2/../file.10", "/dir3/../file.10"); // rename using path traversal with ..
     ck_assert_msg(rv == 0, "Rename with '..' path traversal failed");
