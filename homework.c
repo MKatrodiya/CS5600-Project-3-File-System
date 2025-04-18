@@ -416,8 +416,12 @@ int fs_create(const char *path, mode_t mode, struct fuse_file_info *fi)
     char *filename = resolved_components[resolved_count - 1];
 
     char parent_path[256] = "/";
-    for (int i = 0; i < resolved_count - 1; i++) {
+    for (int i = 0; i < resolved_count - 1; i++) 
+    {
         strcat(parent_path, resolved_components[i]);
+        if (i < resolved_count - 2) {
+            strcat(parent_path, "/");
+        }
     }
 
     uint32_t parent_inum;
@@ -545,8 +549,12 @@ int fs_mkdir(const char *path, mode_t mode)
     char *dirname = resolved_components[resolved_count - 1];
 
     char parent_path[256] = "/";
-    for (int i = 0; i < resolved_count - 1; i++) {
+    for (int i = 0; i < resolved_count - 1; i++) 
+    {
         strcat(parent_path, resolved_components[i]);
+        if (i < resolved_count - 2) {
+            strcat(parent_path, "/");
+        }
     }
 
     uint32_t parent_inum;
@@ -685,6 +693,10 @@ int fs_unlink(const char *path)
     for (int i = 0; i < resolved_count - 1; i++) 
     {
         strcat(parent_path, resolved_components[i]);
+        if (i < resolved_count - 2) {
+            strcat(parent_path, "/");
+        }
+        
     }
 
     uint32_t parent_inum;
@@ -791,6 +803,9 @@ int fs_rmdir(const char *path)
     for (int i = 0; i < resolved_count - 1; i++) 
     {
         strcat(parent_path, resolved_components[i]);
+        if (i < resolved_count - 2) {
+            strcat(parent_path, "/");
+        }
     }
 
     uint32_t parent_inum;
@@ -881,16 +896,23 @@ int fs_rename(const char *src_path, const char *dst_path)
     char parent_src_path[256] = "/";
     char parent_dst_path[256] = "/";
     
-    for (int i = 0; i < resolved_count_src - 1; i++) {
+    for (int i = 0; i < resolved_count_src - 1; i++) 
+    {
         strcat(parent_src_path, resolved_srcpath[i]);
+        if (i < resolved_count_src - 2) {
+            strcat(parent_src_path, "/");
+        }
     }
-    for (int i = 0; i < resolved_count_dst - 1; i++) {
+    for (int i = 0; i < resolved_count_dst - 1; i++) 
+    {
         strcat(parent_dst_path, resolved_dstpath[i]);
+        if (i < resolved_count_dst - 2) {
+            strcat(parent_dst_path, "/");
+        }
     }
-
+    
     uint32_t src_parent_inum, dst_parent_inum;
     struct fs_inode dummy_inode;
-
     
     if (translate(parent_src_path, &src_parent_inum, &dummy_inode) != 0 ||
         translate(parent_dst_path, &dst_parent_inum, &dummy_inode) != 0) {
@@ -1237,7 +1259,8 @@ int fs_statfs(const char *path, struct statvfs *st)
     st->f_blocks = total_blocks - metadata_blocks;
 
     int used_blocks = 0;
-    for (int i = 0; i < superblock.disk_size; i++) {
+    for (int i = 0; i < superblock.disk_size; i++) 
+    {
         if (bit_test(bitmap, i)) 
         {
             used_blocks++;
