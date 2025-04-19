@@ -75,24 +75,24 @@ void* fs_init(struct fuse_conn_info *conn)
 	char buffer[FS_BLOCK_SIZE];
 	if (block_read(buffer, 0, 1) != 0) 
 	{
-		perror("In fs_init: superblock read failed");
+		fprintf(stderr, "[fs_init]: superblock read failed\n");
 		return NULL;
 	}
 	memcpy(&superblock, buffer, sizeof(struct fs_super));
 
 	if (superblock.magic != FS_MAGIC) {
-		perror("In fs_init: invalid magic number");
+		fprintf(stderr, "[fs_init]: invalid magic number\n");
 		return NULL;
 	}
 
 	bitmap = malloc(FS_BLOCK_SIZE); // Allocate memory for block bitmap
 	if (!bitmap) {
-		perror("In fs_init: bitmap malloc failed");
+		fprintf(stderr, "[fs_init]: bitmap malloc failed\n");
 		return NULL;
 	}
 
 	if (block_read(bitmap, 1, 1) != 0) {
-		perror("In fs_init: bitmap read failed");
+		fprintf(stderr, "[fs_init]: bitmap read failed\n");
 		free(bitmap);
 		bitmap = NULL;
 		return NULL;
@@ -158,6 +158,10 @@ int pathparse(const char *path, char **components)
 	return i;
 }
 
+/* translate - translate a path into an inode number.
+ *  success - return 0
+ *  errors - ENOENT, ENOTDIR, EIO
+ */
 int translate(const char *path, uint32_t *inum, struct fs_inode *inode) 
 {
 	char *components[MAX_PATH_LEN];
@@ -171,7 +175,7 @@ int translate(const char *path, uint32_t *inum, struct fs_inode *inode)
 	// Handle the case where the path is empty ("") or path is ("/")
 	if (num_components == 0) {
 		if (read_inode(current_inum, inode) != 0) {
-			perror("In translate: read_inode failed for root");
+			fprintf(stderr, "[translate]: read_inode failed for root\n");
 			return -EIO;
 		}
 		*inum = current_inum;
@@ -195,13 +199,13 @@ int translate(const char *path, uint32_t *inum, struct fs_inode *inode)
 		struct fs_inode current_inode;
 		if (read_inode(current_inum, &current_inode) != 0) 
 		{
-			perror("In translate: read_inode failed");
+			fprintf(stderr, "[translate]: read_inode failed\n");
 			return -EIO;
 		}
 
 		if (!S_ISDIR(current_inode.mode)) 
 		{
-			perror("In translate: not a directory");
+			fprintf(stderr, "[translate]: not a directory\n");
 			return -ENOTDIR;
 		}
 		int found = 0;
@@ -210,7 +214,7 @@ int translate(const char *path, uint32_t *inum, struct fs_inode *inode)
 			char block[FS_BLOCK_SIZE];
 			if (block_read(block, current_inode.ptrs[j], 1) != 0) 
 			{
-				perror("In translate: block read failed");
+				fprintf(stderr, "[translate]: block read failed\n");
 				return -EIO;
 			}
 			struct fs_dirent *entries = (struct fs_dirent *)block;
@@ -238,13 +242,17 @@ int translate(const char *path, uint32_t *inum, struct fs_inode *inode)
 
 	if (read_inode(current_inum, inode) != 0) 
 	{
-		perror("In translate: read_inode failed for final inode");
+		fprintf(stderr, "[translate]: read_inode failed for final inode\n");
 		return -EIO;
 	}
 	*inum = current_inum;
 	return 0;
 }
 
+/* resolve_path - resolve the path components to get the simplified final path.
+ *  success - return number of resolved components
+ * 
+ */
 int resolve_path(char **components, int num_components, char **resolved) 
 {
 	if (num_components <= 0) {
@@ -284,6 +292,9 @@ int resolve_path(char **components, int num_components, char **resolved)
 	return resolved_index;
 }
 
+/*	 free_components - free the memory allocated for components.
+ *  success - return 0
+ */ 
 void free_components(char **components, int num_components)
 {
 	if (components) {
@@ -296,7 +307,9 @@ void free_components(char **components, int num_components)
 	}
 }
 
-// populate stat struct from inode
+/* setstat - set the fields of 'struct stat' from the inode.
+ *  success - return 0
+ */
 void setstat(struct fs_inode inode, struct stat *sb) {	
 	sb->st_uid = inode.uid;
 	sb->st_gid = inode.gid;
@@ -356,12 +369,12 @@ int fs_readdir(const char *path, void *ptr, fuse_fill_dir_t filler, off_t offset
 	int res = translate(path, &inum, &inode);
 	if (res != 0)
 	{
-		perror("In fs_readdir: translate failed");
+		fprintf(stderr, "[fs_readdir]: translate failed\n");
 		return res;
 	}
 	if (!S_ISDIR(inode.mode)) 
 	{
-		perror("In fs_readdir: not a directory");
+		fprintf(stderr, "[fs_readdir]: not a directory\n");
 		return -ENOTDIR;
 	}
 
@@ -370,7 +383,7 @@ int fs_readdir(const char *path, void *ptr, fuse_fill_dir_t filler, off_t offset
 		char block[FS_BLOCK_SIZE];
 		if (block_read(block, inode.ptrs[i], 1) != 0) 
 		{
-			perror("In fs_readdir: block read failed");
+			fprintf(stderr, "[fs_readdir]: block read failed\n");
 			return -EIO;
 		}
 		struct fs_dirent *entries = (struct fs_dirent *)block;
@@ -608,7 +621,7 @@ int fs_mkdir(const char *path, mode_t mode)
 	{
 		return -ENOSPC;
 	}
-	
+
 	bit_set(bitmap, dir_inum);
 	bit_set(bitmap, data_block);
 	if (block_write(bitmap, 1, 1) != 0) 
@@ -951,7 +964,7 @@ int fs_rename(const char *src_path, const char *dst_path)
 		char block[FS_BLOCK_SIZE];
 		if (block_read(block, parent_inode.ptrs[i], 1) != 0) 
 		{
-			perror("In fs_rename: block read failed");
+			fprintf(stderr, "[fs_rename]: block read failed\n");
 			return -EIO;
 		}
 		struct fs_dirent *entries = (struct fs_dirent *)block;
@@ -983,7 +996,7 @@ int fs_rename(const char *src_path, const char *dst_path)
 
 			if (block_write(block, parent_inode.ptrs[i], 1) != 0) 
 			{
-				perror("In fs_rename: block write failed");
+				fprintf(stderr, "[fs_rename]: block write failed\n");
 				return -EIO;
 			}
 
@@ -1132,7 +1145,7 @@ int fs_read(const char *path, char *buf, size_t len, off_t offset, struct fuse_f
 	{
 		len = inode.size - offset;
 	}
-	
+
 	size_t bytes_read = 0;
 	while (bytes_read < len) 
 	{
@@ -1142,7 +1155,7 @@ int fs_read(const char *path, char *buf, size_t len, off_t offset, struct fuse_f
 		char block_data[FS_BLOCK_SIZE];
 		if (block_read(block_data, block, 1) != 0) 
 		{
-			perror("In fs_read: block read failed");
+			fprintf(stderr, "[fs_read]: block read failed\n");
 			return -EIO;
 		}
 
