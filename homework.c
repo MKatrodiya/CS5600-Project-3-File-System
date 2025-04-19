@@ -620,7 +620,7 @@ int fs_mkdir(const char *path, mode_t mode)
 	struct fuse_context *ctx = fuse_get_context();
 	dir_inode.uid = ctx->uid;
 	dir_inode.gid = ctx->gid;
-	dir_inode.mode = S_IFDIR | mode,
+	dir_inode.mode = S_IFDIR | mode;
 	dir_inode.ctime = time(NULL);
 	dir_inode.mtime = dir_inode.ctime;
 	dir_inode.size = FS_BLOCK_SIZE;
@@ -630,6 +630,16 @@ int fs_mkdir(const char *path, mode_t mode)
 	memset(inode_block, 0, FS_BLOCK_SIZE);
 	memcpy(inode_block, &dir_inode, sizeof(dir_inode));
 	if (block_write(inode_block, dir_inum, 1) != 0) 
+	{
+		bit_clear(bitmap, dir_inum);
+		bit_clear(bitmap, data_block);
+		block_write(bitmap, 1, 1);
+		return -EIO;
+	}
+
+	char dirents[FS_BLOCK_SIZE];
+	memset(dirents, 0, FS_BLOCK_SIZE);
+	if (block_write(dirents, data_block, 1) != 0)  
 	{
 		bit_clear(bitmap, dir_inum);
 		bit_clear(bitmap, data_block);
@@ -1246,7 +1256,7 @@ int fs_write(const char *path, const char *buf, size_t len, off_t offset, struct
 	if (new_blocks > current_blocks) {
 		if (block_write(bitmap, 1, 1) != 0) return -EIO;
 	}
-	return len;
+	return bytes_written;
 }
 
 /* statfs - get file system statistics
