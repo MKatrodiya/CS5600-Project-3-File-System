@@ -134,6 +134,9 @@ int read_inode(uint32_t inum, struct fs_inode *inode)
 	return 0;
 }
 
+/* splits the path in components.
+ * returns the number of components. -1, if error. 
+ */
 int pathparse(const char *path, char **components) 
 {
 	char *token;
@@ -303,6 +306,7 @@ void setstat(struct fs_inode inode, struct stat *sb) {
 	sb->st_atime = inode.mtime;
 	sb->st_mtime = inode.mtime;
 	sb->st_ctime = inode.ctime;
+	sb->st_blocks = ceil((double)(inode.size) / FS_BLOCK_SIZE);
 }
 
 /* getattr - get file or directory attributes. For a description of
@@ -361,7 +365,6 @@ int fs_readdir(const char *path, void *ptr, fuse_fill_dir_t filler, off_t offset
 		return -ENOTDIR;
 	}
 
-	//TODO Allow read if read permissions
 	for (int i = 0; i < inode.size / FS_BLOCK_SIZE; i++) 
 	{
 		char block[FS_BLOCK_SIZE];
@@ -582,7 +585,6 @@ int fs_mkdir(const char *path, mode_t mode)
 		struct fs_dirent *entries = (struct fs_dirent *)block;
 		for (int j = 0; j < FS_BLOCK_SIZE / sizeof(struct fs_dirent); j++) 
 		{
-			// TODO: should we just check for directory name? Same directory name and filename possible?
 			if (entries[j].valid && strcmp(entries[j].name, dirname) == 0)
 			{
 				return -EEXIST;
@@ -606,7 +608,7 @@ int fs_mkdir(const char *path, mode_t mode)
 	{
 		return -ENOSPC;
 	}
-	// TODO: Should this be done at the end?
+	
 	bit_set(bitmap, dir_inum);
 	bit_set(bitmap, data_block);
 	if (block_write(bitmap, 1, 1) != 0) 
@@ -680,7 +682,6 @@ int fs_mkdir(const char *path, mode_t mode)
  *  success - return 0
  *  errors - path resolution, ENOENT, EISDIR
  */
-//TODO check for all the entries to be emply to empty the block
 int fs_unlink(const char *path)
 {
 	uint32_t inum;
@@ -997,7 +998,6 @@ int fs_rename(const char *src_path, const char *dst_path)
 	return -EOPNOTSUPP;
 }
 
-// TODO: Should times be updated on each operation?
 /* chmod - change file permissions
  * utime - change access and modification times
  *         (for definition of 'struct utimebuf', see 'man utime')
@@ -1019,8 +1019,7 @@ int fs_chmod(const char *path, mode_t mode)
 	char block[FS_BLOCK_SIZE];
 	memcpy(block, &inode, sizeof(inode));
 
-	// time_t current_time = time(NULL);
-	// inode.mtime = current_time;
+	inode.mtime = time(NULL);
 
 	if (block_write(block, inum, 1) != 0) 
 	{
@@ -1089,6 +1088,7 @@ int fs_truncate(const char *path, off_t len)
 	}
 	memset(inode.ptrs, 0, sizeof(inode.ptrs)); // clear the pointers to the blocks
 	inode.size = 0;
+	inode.mtime = time(NULL);	
 
 	char inode_block[FS_BLOCK_SIZE];
 	memcpy(inode_block, &inode, sizeof(inode));
@@ -1111,7 +1111,6 @@ int fs_truncate(const char *path, off_t len)
  *   - on error, return <0
  * Errors - path resolution, ENOENT, EISDIR
  */
-//TODO: change error return values to match the assignment
 int fs_read(const char *path, char *buf, size_t len, off_t offset, struct fuse_file_info *fi)
 {
 	uint32_t inum;
@@ -1133,7 +1132,7 @@ int fs_read(const char *path, char *buf, size_t len, off_t offset, struct fuse_f
 	{
 		len = inode.size - offset;
 	}
-	//TODO Allow read if read permissions
+	
 	size_t bytes_read = 0;
 	while (bytes_read < len) 
 	{
@@ -1166,10 +1165,8 @@ int fs_read(const char *path, char *buf, size_t len, off_t offset, struct fuse_f
  *  (POSIX semantics support the creation of files with "holes" in them, 
  *   but we don't)
  */
-//TODO check for write permissions before write
 int fs_write(const char *path, const char *buf, size_t len, off_t offset, struct fuse_file_info *fi)
 {
-
 	uint32_t inum;
 	struct fs_inode inode;
 	int inode_res = translate(path, &inum, &inode);
